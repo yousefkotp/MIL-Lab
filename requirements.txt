@@ -18,3 +18,4 @@ future
 omegaconf
 loguru
 torch_geometric
+tensorboard

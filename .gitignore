@@ -166,3 +166,9 @@ src/misc
 .vscode
 src/debug
 core.*
+results/
+logs/
+
+results_old_acc_1/*
+results_acc_8/*
+results_acc_1/*
