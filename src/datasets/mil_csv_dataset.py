@@ -1,7 +1,6 @@
 import os
-import glob
 import logging
-from typing import List, Optional, Dict, Tuple
+from typing import List, Optional, Dict, Tuple, Set
 
 import numpy as np
 import pandas as pd
@@ -11,17 +10,30 @@ from torch.utils.data import Dataset
 logger = logging.getLogger(__name__)
 
 
-def _index_feature_files(root: str, exts: Tuple[str, ...]) -> Dict[str, str]:
-    files = []
-    for ext in exts:
-        files.extend(glob.glob(os.path.join(root, f"**/*{ext}"), recursive=True))
-    index = {}
-    for fp in files:
-        basename = os.path.basename(fp)
-        base_no_ext = os.path.splitext(basename)[0]
-        # map both without and with extension to improve matching robustness
-        index[base_no_ext] = fp
-        index[basename] = fp
+def _index_feature_files(root: str, exts: Tuple[str, ...], target_stems: Set[str]) -> Dict[str, str]:
+    """Index feature files under ``root`` only for the requested stems.
+
+    Stems are the basename without extension from the CSV (e.g., `patient_001_node_0`).
+    Search is recursive so embeddings can live in nested subdirectories.
+    """
+    root = os.path.abspath(os.path.expanduser(root))
+    if not os.path.isdir(root):
+        raise FileNotFoundError(f"features_dir '{root}' does not exist or is not a directory")
+
+    stems_lower = {s.lower() for s in target_stems}
+    index: Dict[str, str] = {}
+    lower_exts = tuple(ext.lower() for ext in exts)
+    for dirpath, _, filenames in os.walk(root):
+        for fname in filenames:
+            if not fname.lower().endswith(lower_exts):
+                continue
+            fp = os.path.join(dirpath, fname)
+            basename = os.path.basename(fp)
+            base_no_ext = os.path.splitext(basename)[0]
+            if base_no_ext.lower() not in stems_lower:
+                continue
+            index[base_no_ext] = fp  # stem key
+            index[basename] = fp     # embedding basename (e.g., .h5)
     return index
 
 
@@ -107,7 +119,7 @@ class MILCSVDataset(Dataset):
         missing = [c for c in required_cols if c not in self.df.columns]
         if missing:
             raise ValueError(f"Missing required columns in CSV: {missing}. Expected columns: 'filename', 'label', 'split'.")
-        self.features_dir = features_dir
+        self.features_dir = os.path.abspath(os.path.expanduser(features_dir))
         self.allowed_exts = allowed_exts
 
         # Standardize labels to ints; if '_y' exists, preserve mapping across splits
@@ -124,7 +136,14 @@ class MILCSVDataset(Dataset):
             self._idx_to_label = {v: k for k, v in self._label_to_idx.items()}
             self.df['_y'] = self.df['label'].map(self._label_to_idx)
 
-        self._file_index = _index_feature_files(self.features_dir, self.allowed_exts)
+        target_stems: Set[str] = set()
+        for slide in self.df['filename'].astype(str).tolist():
+            slide = slide.strip()
+            base = os.path.basename(slide)
+            base_no_ext = os.path.splitext(base)[0]
+            target_stems.add(base_no_ext)
+
+        self._file_index = _index_feature_files(self.features_dir, self.allowed_exts, target_stems=target_stems)
         # filter out rows whose feature file is missing
         keep_rows: List[bool] = []
         missing_ids: List[str] = []
@@ -132,7 +151,12 @@ class MILCSVDataset(Dataset):
             slide = str(row['filename']).strip()
             basename = os.path.basename(slide)
             base_no_ext = os.path.splitext(basename)[0]
-            has_file = (slide in self._file_index) or (basename in self._file_index) or (base_no_ext in self._file_index)
+            # ensure CSV basename also maps to the found file for quick lookup
+            if base_no_ext in self._file_index:
+                self._file_index.setdefault(basename, self._file_index[base_no_ext])
+                self._file_index.setdefault(slide, self._file_index[base_no_ext])
+
+            has_file = (base_no_ext in self._file_index) or (basename in self._file_index)
             keep_rows.append(has_file)
             if not has_file:
                 missing_ids.append(slide)
@@ -174,7 +198,7 @@ class MILCSVDataset(Dataset):
         y = int(row['_y'])
         base_no_ext = os.path.splitext(os.path.basename(slide_id))[0]
         basename = os.path.basename(slide_id)
-        fp = self._file_index.get(slide_id) or self._file_index.get(basename) or self._file_index.get(base_no_ext)
+        fp = self._file_index.get(basename) or self._file_index.get(base_no_ext) or self._file_index.get(slide_id)
         if fp is None:
             raise FileNotFoundError(f"No features for slide_id={slide_id}")
         # Always load features and sort them by row-major (y,x) using coords
