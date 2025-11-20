@@ -7,6 +7,7 @@ from typing import Optional, Tuple
 import time
 
 import numpy as np
+import pandas as pd
 
 # Ensure deterministic CuBLAS algorithms when using torch.use_deterministic_algorithms(True)
 # Must be set before any CuBLAS handle is initialized (i.e., before first CUDA matmul op).
@@ -23,6 +24,7 @@ from sklearn.metrics import (
     balanced_accuracy_score,
 )
 
+from src.datasets.fold_utils import DEFAULT_SPLIT_SEED, prepare_folds
 from src.datasets.linear_csv_dataset import LinearCSVDataset
 
 
@@ -40,7 +42,9 @@ def _make_generator(seed: int) -> torch.Generator:
 
 def parse_args():
     p = argparse.ArgumentParser(description="Train linear probe on per-WSI vector features (.h5 with 'features'=(D,))")
-    p.add_argument('--csv_paths', type=str, nargs='+', required=True, help='List of CSV files for multi-fold training (columns: filename,label,split)')
+    p.add_argument('--csv_path', type=str, required=True, help='Single CSV with columns: filename,label[,case_id]; if case_id is present, all slides from a case are kept in the same fold')
+    p.add_argument('--num_folds', type=int, default=5, help='Number of stratified folds (val ≈ 1/num_folds; train uses the rest). Only train/val splits are created.')
+    p.add_argument('--split_seed', type=int, default=DEFAULT_SPLIT_SEED, help='Seed used only for data split so folds stay identical across runs')
     p.add_argument('--features_dir', type=str, required=True, help='Root directory containing per-slide feature files')
     p.add_argument('--seed', type=int, default=42)
 
@@ -150,10 +154,10 @@ def split_df(df):
     return df_train, df_val, df_test
 
 
-def run_single_fold(args, csv_path: str, fold_idx: int):
+def run_single_fold(args, fold_df: pd.DataFrame, fold_idx: int):
     fold_t0 = time.time()
 
-    base_ds = LinearCSVDataset(csv_path=csv_path, features_dir=args.features_dir)
+    base_ds = LinearCSVDataset(csv_path=None, features_dir=args.features_dir, dataframe=fold_df)
     df = base_ds.df.copy()
     df_train, df_val, df_test = split_df(df)
 
@@ -358,13 +362,23 @@ def main():
         torch.backends.cudnn.allow_tf32 = False
     torch.use_deterministic_algorithms(True)
 
-    csv_list = args.csv_paths
+    try:
+        fold_dfs, _ = prepare_folds(
+            csv_path=args.csv_path,
+            num_folds=args.num_folds,
+            split_seed=args.split_seed,
+        )
+    except ValueError as exc:
+        raise SystemExit(str(exc))
+    if not fold_dfs:
+        raise ValueError("No folds resolved from provided CSV arguments")
+    print(f"Prepared {len(fold_dfs)} folds (split_seed={args.split_seed}; val≈1/{args.num_folds}; grouped by case_id when present) from {args.csv_path}")
 
     t0 = time.time()
     all_fold_summaries = []
-    for i, csv_path in enumerate(csv_list, start=1):
-        print(f"==== Running fold {i}/{len(csv_list)}: {csv_path} ====")
-        fold_res = run_single_fold(args, csv_path, fold_idx=i)
+    for i, fold_df in enumerate(fold_dfs, start=1):
+        print(f"==== Running fold {i}/{len(fold_dfs)} ====")
+        fold_res = run_single_fold(args, fold_df, fold_idx=i)
         all_fold_summaries.append(fold_res)
 
     def _agg(split: str):
@@ -413,8 +427,13 @@ def main():
 
     elapsed_s = max(0.0, float(time.time() - t0))
     elapsed_h = elapsed_s / 3600.0
+    requested_folds = args.num_folds
     summary = {
         'monitor': args.monitor.split('/', 1)[-1],
+        'num_folds': len(all_fold_summaries),
+        'num_folds_requested': requested_folds,
+        'split_seed': args.split_seed,
+        'data_csv': args.csv_path,
         'folds': all_fold_summaries,
         'aggregate': {
             'train': agg_train,

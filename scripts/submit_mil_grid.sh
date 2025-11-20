@@ -1,8 +1,23 @@
 #!/bin/bash
 set -euo pipefail
 
-DATASET="${DATASET:-CAMELYON17}"
+# Define tasks (format: .../<dataset>/<task>/task.csv)
+CSV_PATHS=(
+  /home/kotpaz/scratch/tasks/custom/bc_therapy/grade/task.csv
+)
+if [[ ${#CSV_PATHS[@]} -eq 0 ]]; then
+  echo "CSV_PATHS must list at least one task CSV (format: .../<dataset>/<task>/task.csv)." >&2
+  exit 1
+fi
+for csvp in "${CSV_PATHS[@]}"; do
+  if [[ ! -f "${csvp}" ]]; then
+    echo "CSV path not found: ${csvp}" >&2
+    exit 1
+  fi
+done
+
 GRAD_ACCUM_STEPS="${GRAD_ACCUM_STEPS:-1}"
+NUM_FOLDS="${NUM_FOLDS:-5}"
 
 # Models to run
 MODELS=(
@@ -65,7 +80,7 @@ if [[ ! -f "${LAUNCH_SCRIPT}" ]]; then
   exit 1
 fi
 
-echo "Submitting jobs for ${#MODELS[@]} models × ${#FEATURE_DIRS[@]} feature sets..."
+echo "Submitting jobs for ${#MODELS[@]} models × ${#FEATURE_DIRS[@]} feature sets × ${#CSV_PATHS[@]} tasks..."
 
 for fdir in "${FEATURE_DIRS[@]}"; do
   fdir_noslash="${fdir%/}"
@@ -75,22 +90,28 @@ for fdir in "${FEATURE_DIRS[@]}"; do
     echo "Warning: features dir not found: ${fdir_noslash}" >&2
   fi
 
-  for model in "${MODELS[@]}"; do
-    model_prefix="${model%%.*}"
-    model_second="$(echo "${model}" | cut -d. -f2)"
-    if [[ "${model_prefix}" == "dftd" && "${model_second}" == "base_afs" ]]; then
-      model_dir_name="dftd_afs"
-    else
-      model_dir_name="${model_prefix}"
-    fi
+  for csv_path in "${CSV_PATHS[@]}"; do
+    csv_dir="$(dirname "${csv_path}")"
+    task_name="$(basename "${csv_dir}")"
+    dataset_name="$(basename "$(dirname "${csv_dir}")")"
 
-    job_name="train_${model_dir_name}_slide_hubert_${feat_base}"
-    out_dir="results/${feat_base}/${DATASET}/${model_dir_name}"
+    for model in "${MODELS[@]}"; do
+      model_prefix="${model%%.*}"
+      model_second="$(echo "${model}" | cut -d. -f2)"
+      if [[ "${model_prefix}" == "dftd" && "${model_second}" == "base_afs" ]]; then
+        model_dir_name="dftd_afs"
+      else
+        model_dir_name="${model_prefix}"
+      fi
 
-    echo "sbatch --job-name ${job_name} (features=${feat_base}, model=${model})"
-    sbatch --job-name "${job_name}" \
-      --export=ALL,REPO_ROOT="${REPO_ROOT}",FEATURES_SRC_DIR="${fdir_noslash}",MODEL="${model}",DATASET="${DATASET}",OUTPUT_DIR="${out_dir}",GRAD_ACCUM_STEPS="${GRAD_ACCUM_STEPS}" \
-      "${LAUNCH_SCRIPT}"
+      job_name="train_${model_dir_name}_${feat_base}_${dataset_name}_${task_name}"
+      out_dir="results/${feat_base}/${dataset_name}/${task_name}/${model_dir_name}"
+
+      echo "sbatch --job-name ${job_name} (features=${feat_base}, dataset=${dataset_name}, task=${task_name}, model=${model})"
+      sbatch --job-name "${job_name}" \
+        --export=ALL,REPO_ROOT="${REPO_ROOT}",FEATURES_SRC_DIR="${fdir_noslash}",MODEL="${model}",DATASET="${dataset_name}",TASK="${task_name}",OUTPUT_DIR="${out_dir}",GRAD_ACCUM_STEPS="${GRAD_ACCUM_STEPS}",CSV_PATH="${csv_path}",NUM_FOLDS="${NUM_FOLDS}" \
+        "${LAUNCH_SCRIPT}"
+    done
   done
 done
 

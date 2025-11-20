@@ -9,6 +9,7 @@ import time
 os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
 
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, WeightedRandomSampler
@@ -20,6 +21,7 @@ from sklearn.metrics import (
     balanced_accuracy_score,
 )
 
+from src.datasets.fold_utils import DEFAULT_SPLIT_SEED, prepare_folds
 from src.datasets.mil_csv_dataset import MILCSVDataset
 from src.builder import create_model, save_model
 
@@ -39,7 +41,9 @@ def _make_generator(seed: int) -> torch.Generator:
 
 def parse_args():
     p = argparse.ArgumentParser(description="Train MIL model (MeanMIL default) on CSV-defined dataset with precomputed features")
-    p.add_argument('--csv_paths', type=str, nargs='+', required=True, help='List of CSV files for multi-fold training (columns: filename,label,split)')
+    p.add_argument('--csv_path', type=str, required=True, help='Single CSV with columns: filename,label[,case_id]; if case_id is present, all slides from a case are kept in the same fold')
+    p.add_argument('--num_folds', type=int, default=5, help='Number of stratified folds (val ≈ 1/num_folds; train uses the rest). Only train/val splits are created.')
+    p.add_argument('--split_seed', type=int, default=DEFAULT_SPLIT_SEED, help='Seed used only for data split so folds stay identical across runs')
     p.add_argument('--features_dir', type=str, required=True, help='Root directory containing per-slide feature files')
     p.add_argument('--seed', type=int, default=42)
 
@@ -179,11 +183,11 @@ def mil_collate(batch):
         y = torch.tensor([y], dtype=torch.long)
     return feats, y, slide_id
 
-def run_single_fold(args, csv_path: str, fold_idx: int):
+def run_single_fold(args, fold_df: pd.DataFrame, fold_idx: int):
     # Start wall-clock timer for the entire fold (data loading, training, eval, saves)
     fold_t0 = time.time()
     # Build datasets
-    base_ds = MILCSVDataset(csv_path=csv_path, features_dir=args.features_dir)
+    base_ds = MILCSVDataset(csv_path=None, features_dir=args.features_dir, dataframe=fold_df)
 
     df = base_ds.df.copy()
     df_train, df_val, df_test = split_df(df)
@@ -419,13 +423,22 @@ def main():
         torch.backends.cudnn.allow_tf32 = False
     torch.use_deterministic_algorithms(True)
 
-    # Resolve CSVs: multi-fold only
-    csv_list = args.csv_paths
+    try:
+        fold_dfs, _ = prepare_folds(
+            csv_path=args.csv_path,
+            num_folds=args.num_folds,
+            split_seed=args.split_seed,
+        )
+    except ValueError as exc:
+        raise SystemExit(str(exc))
+    if not fold_dfs:
+        raise ValueError("No folds resolved from provided CSV arguments")
+    print(f"Prepared {len(fold_dfs)} folds (split_seed={args.split_seed}; val≈1/{args.num_folds}; grouped by case_id when present) from {args.csv_path}")
 
     all_fold_summaries = []
-    for i, csv_path in enumerate(csv_list, start=1):
-        print(f"==== Running fold {i}/{len(csv_list)}: {csv_path} ====")
-        fold_res = run_single_fold(args, csv_path, fold_idx=i)
+    for i, fold_df in enumerate(fold_dfs, start=1):
+        print(f"==== Running fold {i}/{len(fold_dfs)} ====")
+        fold_res = run_single_fold(args, fold_df, fold_idx=i)
         all_fold_summaries.append(fold_res)
 
     # Aggregate metrics across folds
@@ -491,8 +504,13 @@ def main():
     # Save summary JSON alongside checkpoints root
     run_elapsed_s = max(0.0, float(time.time() - run_t0))
     run_elapsed_h = run_elapsed_s / 3600.0
+    requested_folds = args.num_folds
     summary = {
         'monitor': args.monitor.split('/', 1)[-1],
+        'num_folds': len(all_fold_summaries),
+        'num_folds_requested': requested_folds,
+        'split_seed': args.split_seed,
+        'data_csv': args.csv_path,
         'folds': all_fold_summaries,
         'aggregate': {
             'train': agg_train,

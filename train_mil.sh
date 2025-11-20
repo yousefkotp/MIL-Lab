@@ -20,12 +20,32 @@ cd "${REPO_ROOT_DIR}"
 # Config (overridable via environment)
 # - MODEL: full model identifier (e.g., abmil.base.slide_hubert.none)
 # - FEATURES_SRC_DIR: absolute path to features directory to copy from
-# - DATASET: dataset name used to build default output path (default: CAMELYON17)
+# - DATASET: dataset name used to build default output path (derived from CSV_PATH if unset)
+# - TASK: task name used in output path (derived from CSV_PATH if unset)
 # - OUTPUT_DIR: if set, overrides the auto-constructed results path
+# - CSV_PATH: path to the single CSV containing columns case_id (optional), filename, label
+# - NUM_FOLDS: number of folds to create from CSV (default: 5)
 #
 MODEL="${MODEL:-abmil.base.slide_hubert.none}"
 FEATURES_SRC_DIR="${FEATURES_SRC_DIR:-/home/mila/k/kotpy/scratch/datasets/CAMELYON17/slide_hubert/20x_512px/clusters_5000_10000_steps_20K_average_overlaps}"
-DATASET="${DATASET:-CAMELYON17}"
+CSV_PATH="${CSV_PATH:-}"  # required: single CSV with filename,label[,case_id]
+NUM_FOLDS="${NUM_FOLDS:-5}"
+
+if [[ -z "${CSV_PATH}" ]]; then
+  echo "Error: CSV_PATH is not set. Provide path to CSV with filename,label[,case_id]." >&2
+  exit 1
+fi
+if [[ ! -f "${CSV_PATH}" ]]; then
+  echo "Error: CSV_PATH does not exist: ${CSV_PATH}" >&2
+  exit 1
+fi
+
+# Derive dataset/task from CSV path if not provided
+CSV_DIR="$(dirname "${CSV_PATH}")"
+DEFAULT_TASK="$(basename "${CSV_DIR}")"
+DEFAULT_DATASET="$(basename "$(dirname "${CSV_DIR}")")"
+DATASET="${DATASET:-${DEFAULT_DATASET}}"
+TASK="${TASK:-${DEFAULT_TASK}}"
 
 # Normalize and derive names
 FEATURES_SRC_DIR="${FEATURES_SRC_DIR%/}"
@@ -40,7 +60,7 @@ else
 fi
 
 # Default results directory if not explicitly provided
-OUTPUT_DIR="${OUTPUT_DIR:-results/slide_hubert/${FEATURES_BASENAME}/${DATASET}/${MODEL_DIR_NAME}}"
+OUTPUT_DIR="${OUTPUT_DIR:-results/${FEATURES_BASENAME}/${DATASET}/${TASK}/${MODEL_DIR_NAME}}"
 
 # Normalize final destination output directory to absolute path rooted at repo if relative
 if [[ "${OUTPUT_DIR}" = /* ]]; then
@@ -62,6 +82,9 @@ TMP_OUTPUT_DIR="${RUN_TMPDIR}/output"
 
 echo "Using SLURM_TMPDIR: ${SLURM_TMPDIR}"
 echo "Run scratch: ${RUN_TMPDIR}"
+echo "CSV path: ${CSV_PATH}"
+echo "Dataset: ${DATASET} | Task: ${TASK}"
+echo "Folds: ${NUM_FOLDS}"
 mkdir -p "${TMP_FEATURES_DIR}" "${TMP_OUTPUT_DIR}"
 
 # Always stage back outputs on exit, even on errors (best effort)
@@ -87,7 +110,8 @@ GRAD_ACCUM_STEPS="${GRAD_ACCUM_STEPS:-1}"
 
 echo "Starting training (writing outputs under ${TMP_OUTPUT_DIR})"
 python train_mil.py \
-    --csv_paths /home/mila/k/kotpy/scratch/softpatchify_code/csvs/CAMELYON17/fold_1.csv /home/mila/k/kotpy/scratch/softpatchify_code/csvs/CAMELYON17/fold_2.csv /home/mila/k/kotpy/scratch/softpatchify_code/csvs/CAMELYON17/fold_3.csv /home/mila/k/kotpy/scratch/softpatchify_code/csvs/CAMELYON17/fold_4.csv /home/mila/k/kotpy/scratch/softpatchify_code/csvs/CAMELYON17/fold_5.csv \
+    --csv_path "${CSV_PATH}" \
+    --num_folds "${NUM_FOLDS}" \
     --features_dir "${TMP_FEATURES_DIR}" \
     --model "${MODEL}" \
     --num_workers "${NUM_WORKERS}" \

@@ -4,12 +4,14 @@
 # Environment overrides (exported by submitter or set inline before sbatch):
 #   - REPO_ROOT: repo root path (defaults to SLURM_SUBMIT_DIR or PWD)
 #   - FEATURES_SRC_DIR: absolute path to per-WSI vector features (.h5/.hdf5 with dataset 'features')
-#   - DATASET: dataset name (default: CAMELYON17)
-#   - OUTPUT_DIR: override final output directory (default: results/linear/<features_base>/<dataset>)
+#   - DATASET: dataset name (derived from CSV_PATH if unset)
+#   - TASK: task name (derived from CSV_PATH if unset)
+#   - OUTPUT_DIR: override final output directory (default: results/<features_base>/<dataset>/<task>/linear)
 #   - EPOCHS, LR, WEIGHT_DECAY, BATCH_SIZE, NUM_WORKERS: training hyperparameters
 #   - BALANCED_SAMPLING: if set to 1/true, pass --balanced_sampling
 #   - NORMALIZE: if set to 1/true, pass --normalize
-#   - CSV_DIR: base directory containing CSV folds (defaults to CAMELYON17 path used in train_mil.sh)
+#   - CSV_PATH: single CSV containing columns filename,label[,case_id]
+#   - NUM_FOLDS: number of folds to create from CSV_PATH (default: 5)
 
 #SBATCH -J train_linear_camelyon
 #SBATCH --ntasks-per-node 1
@@ -30,21 +32,36 @@ cd "${REPO_ROOT_DIR}"
 # See: https://docs.nvidia.com/cuda/cublas/index.html#results-reproducibility
 export CUBLAS_WORKSPACE_CONFIG="${CUBLAS_WORKSPACE_CONFIG:-:4096:8}"
 
-# Inputs and defaults
 FEATURES_SRC_DIR="${FEATURES_SRC_DIR:-}"   # should be absolute path
-DATASET="${DATASET:-CAMELYON17}"
+CSV_PATH="${CSV_PATH:-}"  # required: single CSV with filename,label[,case_id]
+NUM_FOLDS="${NUM_FOLDS:-5}"
 
 if [[ -z "${FEATURES_SRC_DIR}" ]]; then
   echo "ERROR: FEATURES_SRC_DIR is not set. Provide absolute path to vector features." >&2
   exit 1
 fi
+if [[ -z "${CSV_PATH}" ]]; then
+  echo "ERROR: CSV_PATH is not set. Provide path to CSV with filename,label[,case_id]." >&2
+  exit 1
+fi
+if [[ ! -f "${CSV_PATH}" ]]; then
+  echo "ERROR: CSV_PATH does not exist: ${CSV_PATH}" >&2
+  exit 1
+fi
+
+# Derive dataset/task from CSV path if not provided
+CSV_DIR="$(dirname "${CSV_PATH}")"
+DEFAULT_TASK="$(basename "${CSV_DIR}")"
+DEFAULT_DATASET="$(basename "$(dirname "${CSV_DIR}")")"
+DATASET="${DATASET:-${DEFAULT_DATASET}}"
+TASK="${TASK:-${DEFAULT_TASK}}"
 
 # Normalize inputs
 FEATURES_SRC_DIR="${FEATURES_SRC_DIR%/}"
 FEATURES_BASENAME="$(basename "${FEATURES_SRC_DIR}")"
 
 # Default outputs under repo, unless OUTPUT_DIR is provided (absolute allowed)
-OUTPUT_DIR="${OUTPUT_DIR:-results/linear/${FEATURES_BASENAME}/${DATASET}}"
+OUTPUT_DIR="${OUTPUT_DIR:-results/${FEATURES_BASENAME}/${DATASET}/${TASK}/linear}"
 if [[ "${OUTPUT_DIR}" = /* ]]; then
   FINAL_OUTPUT_DIR="${OUTPUT_DIR}"
 else
@@ -62,23 +79,6 @@ NUM_WORKERS="${NUM_WORKERS:-${SLURM_CPUS_PER_TASK:-6}}"
 BALANCED_SAMPLING="${BALANCED_SAMPLING:-0}"
 NORMALIZE="${NORMALIZE:-1}"
 
-# CSV location (five folds as in train_mil.sh)
-CSV_DIR_DEFAULT="/home/mila/k/kotpy/scratch/softpatchify_code/csvs/${DATASET}"
-CSV_DIR="${CSV_DIR:-${CSV_DIR_DEFAULT}}"
-CSV_FOLDS=(
-  "${CSV_DIR}/fold_1.csv"
-  "${CSV_DIR}/fold_2.csv"
-  "${CSV_DIR}/fold_3.csv"
-  "${CSV_DIR}/fold_4.csv"
-  "${CSV_DIR}/fold_5.csv"
-)
-
-for f in "${CSV_FOLDS[@]}"; do
-  if [[ ! -f "${f}" ]]; then
-    echo "Warning: CSV not found: ${f}" >&2
-  fi
-done
-
 ################ ENFORCE SLURM TMPDIR ################
 if [[ -z "${SLURM_TMPDIR:-}" ]]; then
   echo "Error: SLURM_TMPDIR is not set. This script requires a Slurm temporary directory." >&2
@@ -91,6 +91,9 @@ TMP_OUTPUT_DIR="${RUN_TMPDIR}/output"
 
 echo "Using SLURM_TMPDIR: ${SLURM_TMPDIR}"
 echo "Run scratch: ${RUN_TMPDIR}"
+echo "CSV path: ${CSV_PATH}"
+echo "Dataset: ${DATASET} | Task: ${TASK}"
+echo "Folds: ${NUM_FOLDS}"
 mkdir -p "${TMP_FEATURES_DIR}" "${TMP_OUTPUT_DIR}"
 
 stage_back() {
@@ -118,7 +121,8 @@ fi
 
 echo "Starting linear training (outputs under ${TMP_OUTPUT_DIR})"
 python train_linear.py \
-  --csv_paths "${CSV_FOLDS[@]}" \
+  --csv_path "${CSV_PATH}" \
+  --num_folds "${NUM_FOLDS}" \
   --features_dir "${TMP_FEATURES_DIR}" \
   --epochs "${EPOCHS}" \
   --lr "${LR}" \
