@@ -41,6 +41,7 @@ def create_model(
         from_pretrained: bool = False,
         pretrained_strict: bool = False,
         keep_classifier: bool = False,
+        input_dim: int = None,
         **kwargs,
 ):
     """
@@ -54,6 +55,7 @@ def create_model(
         from_pretrained (bool, optional): If True, load model using Hugging Face's from_pretrained method. Defaults to False.
         pretrained_strict (bool, optional): Whether to strictly enforce that the keys in state_dict match the model. Defaults to False.
         keep_classifier (bool, optional): Whether to keep or remove classification head from pretrained model. Defaults to False.
+        input_dim (int, optional): Override input feature dimension; if None, use ENCODER_DIM_MAPPING for encoder.
         **kwargs: Additional keyword arguments passed to the model builder.
 
     Returns:
@@ -81,6 +83,7 @@ def create_model(
         from_pretrained=from_pretrained ,
         pretrained_strict=pretrained_strict,
         keep_classifier=keep_classifier,
+        input_dim_override=input_dim,
         **kwargs,
     )
 
@@ -107,6 +110,7 @@ def build_model(
     from_pretrained: bool = False,
     pretrained_strict: bool = False,
     keep_classifier: bool = False,
+    input_dim_override: int = None,
     **kwargs,
 ) -> nn.Module:
     """
@@ -122,6 +126,7 @@ def build_model(
         from_pretrained (bool, optional): If True, use Hugging Face's from_pretrained method. Defaults to False.
         pretrained_strict (bool, optional): Whether to strictly enforce that the keys in state_dict match the model. Defaults to False.
         keep_classifier (bool, optional): Whether to keep or remove classification head from pretrained model. Defaults to True.
+        input_dim_override (int, optional): If provided, bypasses ENCODER_DIM_MAPPING and uses this dimension.
         **kwargs: Additional keyword arguments passed to the model builder.
 
     Returns:
@@ -133,7 +138,7 @@ def build_model(
         Exception: For other errors during model instantiation.
     """
     config = _load_model_config(model_name, model_config)
-    config['in_dim'] = ENCODER_DIM_MAPPING[encoder]
+    config['in_dim'] = input_dim_override if input_dim_override is not None else ENCODER_DIM_MAPPING[encoder]
     config['num_classes'] = num_classes
 
     model_cls, config_cls = MODEL_ENTRYPOINTS[model_name]
@@ -186,4 +191,3 @@ def _create_pretrained_config(name_dict: ModelDict,
     default_cfg['local_path_parent'] = os.path.join(REPO_PATH, local_source, model_path)
     default_cfg['local_path'] = os.path.join(REPO_PATH, local_source, model_path)
     return default_cfg
-

@@ -207,6 +207,22 @@ def mil_collate(batch):
     return feats, y, sample_id
 
 
+def _infer_in_dim_from_dataset(ds: torch.utils.data.Dataset) -> int:
+    """
+    Inspect a single item to infer the instance feature dimension.
+    Supports single-slide tensors or list-of-tensors (multi-slide).
+    """
+    sample = ds[0]
+    feats = sample[0] if isinstance(sample, (list, tuple)) else sample
+    if isinstance(feats, list):
+        feats = feats[0]
+    if not torch.is_tensor(feats):
+        raise ValueError("Could not infer input dimension: sample features are not a tensor.")
+    if feats.dim() < 1:
+        raise ValueError(f"Could not infer input dimension from shape {feats.shape}")
+    return int(feats.shape[-1])
+
+
 def forward_with_case_fusion(model, feats, y, *, device, criterion):
     """
     Handle single-slide and multi-slide (late-fusion) inputs.
@@ -294,6 +310,7 @@ def run_single_fold(args, fold_df: pd.DataFrame, fold_idx: int):
     # determine number of classes and label names before building eval loaders
     num_classes = train_ds.num_classes
     label_names = [train_ds.label_map[i] for i in range(num_classes)]
+    inferred_in_dim = _infer_in_dim_from_dataset(train_ds)
 
     # training-set evaluation loader (no shuffle / no sampler)
     eval_train_loader = DataLoader(train_ds,
@@ -306,7 +323,11 @@ def run_single_fold(args, fold_df: pd.DataFrame, fold_idx: int):
                                    worker_init_fn=_seed_worker,
                                    generator=_make_generator(fold_seed + 3))
 
-    model = create_model(model_name=args.model, num_classes=num_classes, from_pretrained=False, keep_classifier=False)
+    model = create_model(model_name=args.model,
+                         num_classes=num_classes,
+                         from_pretrained=False,
+                         keep_classifier=False,
+                         input_dim=inferred_in_dim)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model.to(device)
 
