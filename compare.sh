@@ -46,7 +46,7 @@ for run in "${ALL_RUNS[@]}"; do
   GROUPS["${key}"]+="${run} "
 done
 
-LOG_ROOT="${RESULTS_ROOT%/}/../logs/compare"
+LOG_ROOT="compare"
 mkdir -p "${LOG_ROOT}"
 
 for key in "${!GROUPS[@]}"; do

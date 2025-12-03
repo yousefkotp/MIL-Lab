@@ -54,6 +54,9 @@ def parse_args():
     p.add_argument('--num_workers', type=int, default=4)
     p.add_argument('--grad_accum_steps', type=int, default=1,
                    help='Number of steps to accumulate gradients before optimizer step')
+    p.add_argument('--case_fusion', type=str, default='late', choices=['late', 'early'],
+                   help="How to fuse multiple slides per case when 'case_id'/'slide_ids' are present. "
+                        "'late' (default) averages per-slide logits; 'early' concatenates patches before MIL.")
 
     p.add_argument('--output_dir', type=str, default='outputs', help='Root output directory containing runs/ and checkpoints/')
     p.add_argument('--exp_name', type=str, default=None)
@@ -87,29 +90,37 @@ def evaluate(model, loader, device, num_classes, label_names: Optional[list] = N
     all_labels = []
     total_loss = 0.0
     criterion = nn.CrossEntropyLoss()
-    # Track average number of embeddings (instances) per WSI
-    n_slides = 0
+    # Track average number of embeddings (instances) per WSI (case)
+    n_cases = 0
     sum_embeddings = 0.0
     for feats, y, _ in loader:
-        feats = feats.to(device, non_blocking=True)
-        y = y.to(device, non_blocking=True)
-        # Count embeddings per slide (feats.shape is [1, M, D] per our collate)
+        # Count embeddings per case (sum across slides if multi-slide)
         try:
-            if feats.dim() >= 3:
-                m = int(feats.shape[1])
-            elif feats.dim() == 2:
-                m = int(feats.shape[0])
+            if isinstance(feats, list):
+                m = 0
+                for f in feats:
+                    if f.dim() >= 3:
+                        m += int(f.shape[1])
+                    elif f.dim() == 2:
+                        m += int(f.shape[0])
+                    else:
+                        m += 1
             else:
-                m = 1
+                if feats.dim() >= 3:
+                    m = int(feats.shape[1])
+                elif feats.dim() == 2:
+                    m = int(feats.shape[0])
+                else:
+                    m = 1
             sum_embeddings += float(m)
-            n_slides += 1
+            n_cases += 1
         except Exception:
             pass
-        results, _ = model(feats, loss_fn=criterion, label=y)
-        loss = results['loss']
+
+        logits, loss = forward_with_case_fusion(model, feats, y, device=device, criterion=criterion)
         if loss is not None:
             total_loss += float(loss.item())
-        all_logits.append(results['logits'].detach().cpu())
+        all_logits.append(logits.detach().cpu())
         all_labels.append(y.detach().cpu())
     if len(all_logits) == 0:
         return {}, np.array([]), np.array([])
@@ -123,9 +134,9 @@ def evaluate(model, loader, device, num_classes, label_names: Optional[list] = N
     metrics['loss'] = total_loss / max(1, len(loader))
     metrics['acc'] = accuracy_score(labels, preds)
     metrics['balanced_acc'] = balanced_accuracy_score(labels, preds)
-    # Average number of embeddings per WSI in this split
-    if n_slides > 0:
-        metrics['avg_embeddings_per_wsi'] = float(sum_embeddings / float(n_slides))
+    # Average number of embeddings per case in this split
+    if n_cases > 0:
+        metrics['avg_embeddings_per_wsi'] = float(sum_embeddings / float(n_cases))
 
     # per-class accuracy (recall per class)
     per_class_acc = []
@@ -170,9 +181,21 @@ def evaluate(model, loader, device, num_classes, label_names: Optional[list] = N
 
 def mil_collate(batch):
     # batch size is always 1; ensure features have a batch dimension
-    feats, y, slide_id = batch[0]
-    if feats.dim() == 2:
-        feats = feats.unsqueeze(0)  # [1, M, D]
+    feats, y, sample_id = batch[0]
+    if isinstance(feats, list):
+        processed = []
+        for f in feats:
+            if f.dim() == 1:
+                f = f.unsqueeze(0)
+            if f.dim() == 2:
+                f = f.unsqueeze(0)  # [1, M, D]
+            processed.append(f)
+        feats = processed
+    else:
+        if feats.dim() == 1:
+            feats = feats.unsqueeze(0)
+        if feats.dim() == 2:
+            feats = feats.unsqueeze(0)  # [1, M, D]
     # ensure label has batch dimension [1]
     if isinstance(y, torch.Tensor):
         if y.dim() == 0:
@@ -181,13 +204,43 @@ def mil_collate(batch):
             y = y.long()
     else:
         y = torch.tensor([y], dtype=torch.long)
-    return feats, y, slide_id
+    return feats, y, sample_id
+
+
+def forward_with_case_fusion(model, feats, y, *, device, criterion):
+    """
+    Handle single-slide and multi-slide (late-fusion) inputs.
+
+    For multi-slide cases (``feats`` is a list), the model is applied per slide and
+    logits are averaged. Loss is computed on the fused logits.
+    """
+    y = y.to(device, non_blocking=True)
+    if isinstance(feats, list):
+        slide_logits = []
+        for slide_feats in feats:
+            slide_feats = slide_feats.to(device, non_blocking=True)
+            out, _ = model(slide_feats, loss_fn=None, label=None)
+            slide_logits.append(out['logits'])
+        logits_stack = torch.cat(slide_logits, dim=0)  # [S, C]
+        if logits_stack.dim() == 1:
+            logits_stack = logits_stack.unsqueeze(0)
+        fused_logits = logits_stack.mean(dim=0, keepdim=True)  # [1, C]
+        loss = criterion(fused_logits, y) if criterion is not None else None
+        return fused_logits, loss
+
+    feats = feats.to(device, non_blocking=True)
+    out, _ = model(feats, loss_fn=criterion, label=y)
+    logits = out['logits']
+    loss = out['loss'] if out['loss'] is not None else None
+    if loss is None and criterion is not None:
+        loss = criterion(logits, y)
+    return logits, loss
 
 def run_single_fold(args, fold_df: pd.DataFrame, fold_idx: int):
     # Start wall-clock timer for the entire fold (data loading, training, eval, saves)
     fold_t0 = time.time()
     # Build datasets
-    base_ds = MILCSVDataset(csv_path=None, features_dir=args.features_dir, dataframe=fold_df)
+    base_ds = MILCSVDataset(csv_path=None, features_dir=args.features_dir, dataframe=fold_df, case_fusion=args.case_fusion)
 
     df = base_ds.df.copy()
     df_train, df_val, df_test = split_df(df)
@@ -195,7 +248,7 @@ def run_single_fold(args, fold_df: pd.DataFrame, fold_idx: int):
     def make_loader(sub_df, shuffle: bool, balanced: bool = False, *, seed: Optional[int] = None):
         if sub_df is None or len(sub_df) == 0:
             return None, None
-        ds = MILCSVDataset(csv_path=None, features_dir=args.features_dir, dataframe=sub_df)
+        ds = MILCSVDataset(csv_path=None, features_dir=args.features_dir, dataframe=sub_df, case_fusion=args.case_fusion)
         loader_seed = seed if seed is not None else args.seed
         loader_generator = _make_generator(loader_seed)
         if balanced:
@@ -276,10 +329,9 @@ def run_single_fold(args, fold_df: pd.DataFrame, fold_idx: int):
         accum_steps = max(1, int(getattr(args, 'grad_accum_steps', 1)))
         num_steps = len(train_loader)
         for step_idx, (feats, y, _) in enumerate(train_loader, start=1):
-            feats = feats.to(device, non_blocking=True)
-            y = y.to(device, non_blocking=True)
-            out, _ = model(feats, loss_fn=criterion, label=y)
-            raw_loss = out['loss'] if out['loss'] is not None else criterion(out['logits'], y)
+            logits, raw_loss = forward_with_case_fusion(model, feats, y, device=device, criterion=criterion)
+            if raw_loss is None:
+                raw_loss = criterion(logits, y.to(device, non_blocking=True))
             running_loss += float(raw_loss.item())
 
             loss = raw_loss / float(accum_steps)

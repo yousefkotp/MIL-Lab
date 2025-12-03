@@ -100,6 +100,16 @@ def _load_features_sorted(fp: str) -> torch.Tensor:
         feats_sorted = feats[idx]
         return torch.from_numpy(feats_sorted).float()
 
+
+def _as_list(val) -> List[str]:
+    """Coerce a value into a list of strings."""
+    if isinstance(val, (list, tuple, set)):
+        return [str(v) for v in val]
+    if pd.isna(val):
+        return []
+    return [str(val)]
+
+
 class MILCSVDataset(Dataset):
     def __init__(
         self,
@@ -107,78 +117,172 @@ class MILCSVDataset(Dataset):
         features_dir: str = '',
         allowed_exts: Tuple[str, ...] = ('.h5', '.hdf5'),
         dataframe: Optional[pd.DataFrame] = None,
+        case_fusion: str = 'late',
     ):
+        """
+        Dataset that loads patch-level features and supports multiple slides per case.
+
+        If a ``case_id`` column is present (or ``slide_ids`` lists are provided), rows are
+        grouped by case. ``case_fusion`` controls how slides are combined:
+          - 'late' (default): keep slides separate and average logits in the training loop.
+          - 'early': concatenate patch embeddings from all slides into one bag.
+        """
         super().__init__()
+        if case_fusion not in ('late', 'early'):
+            raise ValueError(f"case_fusion must be 'late' or 'early', got {case_fusion}")
+        self.case_fusion = case_fusion
+
         if dataframe is not None:
-            self.df = dataframe.copy()
+            df = dataframe.copy()
         else:
             assert csv_path is not None, "csv_path or dataframe must be provided"
-            self.df = pd.read_csv(csv_path)
-        # Validate fixed schema: filename, label, split
-        required_cols = ['filename', 'label', 'split']
-        missing = [c for c in required_cols if c not in self.df.columns]
+            df = pd.read_csv(csv_path)
+
+        # Validate presence of core columns (allow grouped data with slide_ids)
+        required_cols = ['label', 'split']
+        missing = [c for c in required_cols if c not in df.columns]
         if missing:
-            raise ValueError(f"Missing required columns in CSV: {missing}. Expected columns: 'filename', 'label', 'split'.")
+            raise ValueError(f"Missing required columns in CSV: {missing}. Expected at least: {required_cols}")
+        if 'filename' not in df.columns and 'slide_ids' not in df.columns:
+            raise ValueError("CSV must contain either 'filename' (per-slide) or 'slide_ids' (list per case).")
+
         self.features_dir = os.path.abspath(os.path.expanduser(features_dir))
         self.allowed_exts = allowed_exts
 
-        # Standardize labels to ints; if '_y' exists, preserve mapping across splits
-        if '_y' in self.df.columns:
-            pairs = self.df[['label', '_y']].drop_duplicates()
-            # ensure one-to-one mapping per label
-            pairs = pairs.sort_values('_y')
+        # Label mapping (preserve if provided)
+        if '_y' in df.columns:
+            pairs = df[['label', '_y']].drop_duplicates().sort_values('_y')
             self._label_to_idx = {row['label']: int(row['_y']) for _, row in pairs.iterrows()}
             self._idx_to_label = {int(row['_y']): row['label'] for _, row in pairs.iterrows()}
-            # ensure df['_y'] is int dtype
-            self.df['_y'] = self.df['_y'].astype(int)
+            df['_y'] = df['_y'].astype(int)
         else:
-            self._label_to_idx = {l: i for i, l in enumerate(sorted(self.df['label'].unique()))}
+            self._label_to_idx = {l: i for i, l in enumerate(sorted(df['label'].unique()))}
             self._idx_to_label = {v: k for k, v in self._label_to_idx.items()}
-            self.df['_y'] = self.df['label'].map(self._label_to_idx)
+            df['_y'] = df['label'].map(self._label_to_idx)
 
+        self.raw_df = df.copy()
+
+        # Build per-sample (case) records
+        self.samples = []
+        if 'slide_ids' in df.columns:
+            for _, row in df.iterrows():
+                slide_ids = _as_list(row['slide_ids'])
+                if len(slide_ids) == 0:
+                    continue
+                case_id = row['case_id'] if 'case_id' in row else None
+                sample_id = str(case_id) if case_id is not None and not (isinstance(case_id, float) and np.isnan(case_id)) else slide_ids[0]
+                split = row['split'] if 'split' in row else 'train'
+                self.samples.append({
+                    'id': str(sample_id),
+                    'case_id': str(case_id) if case_id is not None else None,
+                    'slide_ids': slide_ids,
+                    'label': row['label'],
+                    'label_idx': int(row['_y']),
+                    'split': split,
+                })
+        elif 'case_id' in df.columns:
+            grouped = df.groupby(df['case_id'].astype(str), sort=False)
+            for case_id, grp in grouped:
+                slide_ids = grp['filename'].astype(str).tolist()
+                if len(slide_ids) == 0:
+                    continue
+                label_vals = grp['label'].unique()
+                if len(label_vals) != 1:
+                    raise ValueError(f"Inconsistent labels for case_id={case_id}: {label_vals}")
+                y_vals = grp['_y'].unique()
+                if len(y_vals) != 1:
+                    raise ValueError(f"Inconsistent mapped labels for case_id={case_id}: {y_vals}")
+                split_vals = grp['split'].unique() if 'split' in grp.columns else ['train']
+                if len(split_vals) != 1:
+                    raise ValueError(f"Inconsistent split assignments for case_id={case_id}: {split_vals}")
+                self.samples.append({
+                    'id': str(case_id),
+                    'case_id': str(case_id),
+                    'slide_ids': slide_ids,
+                    'label': label_vals[0],
+                    'label_idx': int(y_vals[0]),
+                    'split': split_vals[0],
+                })
+        else:
+            for _, row in df.iterrows():
+                slide_id = str(row['filename'])
+                if not slide_id:
+                    continue
+                split = row['split'] if 'split' in row else 'train'
+                self.samples.append({
+                    'id': slide_id,
+                    'case_id': None,
+                    'slide_ids': [slide_id],
+                    'label': row['label'],
+                    'label_idx': int(row['_y']),
+                    'split': split,
+                })
+
+        # Index feature files for all slides we expect
+        all_slide_ids: List[str] = []
+        for s in self.samples:
+            all_slide_ids.extend(s['slide_ids'])
         target_stems: Set[str] = set()
-        for slide in self.df['filename'].astype(str).tolist():
-            slide = slide.strip()
+        for slide in all_slide_ids:
+            slide = str(slide).strip()
             base = os.path.basename(slide)
             base_no_ext = os.path.splitext(base)[0]
             target_stems.add(base_no_ext)
 
         self._file_index = _index_feature_files(self.features_dir, self.allowed_exts, target_stems=target_stems)
-        # filter out rows whose feature file is missing
-        keep_rows: List[bool] = []
+
+        # Filter out samples whose slides are missing
+        filtered_samples: List[dict] = []
         missing_ids: List[str] = []
-        for _, row in self.df.iterrows():
-            slide = str(row['filename']).strip()
-            basename = os.path.basename(slide)
-            base_no_ext = os.path.splitext(basename)[0]
-            # ensure CSV basename also maps to the found file for quick lookup
-            if base_no_ext in self._file_index:
-                self._file_index.setdefault(basename, self._file_index[base_no_ext])
-                self._file_index.setdefault(slide, self._file_index[base_no_ext])
+        matched_slides = 0
+        for sample in self.samples:
+            paths = []
+            resolved_slide_ids = []
+            for slide in sample['slide_ids']:
+                basename = os.path.basename(str(slide).strip())
+                base_no_ext = os.path.splitext(basename)[0]
+                if base_no_ext in self._file_index:
+                    self._file_index.setdefault(basename, self._file_index[base_no_ext])
+                    self._file_index.setdefault(slide, self._file_index[base_no_ext])
+                fp = self._file_index.get(basename) or self._file_index.get(base_no_ext) or self._file_index.get(slide)
+                if fp is None:
+                    missing_ids.append(str(slide))
+                    continue
+                paths.append(fp)
+                resolved_slide_ids.append(basename)
+            if len(paths) == 0:
+                continue
+            matched_slides += len(paths)
+            filtered_samples.append({**sample, 'paths': paths, 'slide_ids': resolved_slide_ids})
 
-            has_file = (base_no_ext in self._file_index) or (basename in self._file_index)
-            keep_rows.append(has_file)
-            if not has_file:
-                missing_ids.append(slide)
-
-        n_before = int(len(self.df))
-        self.df = self.df[keep_rows].reset_index(drop=True)
-        n_after = int(len(self.df))
-
-        # Expose counters/ids for downstream consumers
-        self.total_rows: int = n_before
-        self.valid_rows: int = n_after
-        self.missing_rows: int = n_before - n_after
-        self.missing_slide_ids: List[str] = missing_ids
-
-        if n_after == 0:
+        total_slides = len(all_slide_ids)
+        self.samples = filtered_samples
+        if len(self.samples) == 0:
             raise RuntimeError(
                 f"No feature files matched. Indexed {len(self._file_index)} files in {self.features_dir}."
             )
-        # Log a concise summary instead of printing per-row
+
+        # Aggregated dataframe aligned with dataset length (one row per case/sample)
+        self.df = pd.DataFrame([{
+            'id': s['id'],
+            'case_id': s.get('case_id'),
+            'filename': s['slide_ids'][0],  # first slide as representative
+            'slide_ids': s['slide_ids'],
+            'split': s['split'],
+            'label': s['label'],
+            '_y': s['label_idx'],
+            'num_slides': len(s['slide_ids']),
+        } for s in self.samples])
+
+        # Expose counters/ids for downstream consumers
+        self.total_rows: int = total_slides
+        self.valid_rows: int = matched_slides
+        self.missing_rows: int = total_slides - matched_slides
+        self.missing_slide_ids: List[str] = missing_ids
+
         logger.info(
-            f"[MILCSVDataset] Matched {self.valid_rows}/{self.total_rows} rows with features; "
-            f"missing={self.missing_rows} in {self.features_dir}"
+            f"[MILCSVDataset] Using {len(self.samples)} samples (grouped by {'case' if 'case_id' in df.columns else 'slide'}) "
+            f"with case_fusion={self.case_fusion}. Matched {self.valid_rows}/{self.total_rows} slides; missing={self.missing_rows}."
         )
 
     @property
@@ -190,19 +294,25 @@ class MILCSVDataset(Dataset):
         return self._idx_to_label
 
     def __len__(self) -> int:
-        return len(self.df)
+        return len(self.samples)
 
     def __getitem__(self, idx: int):
-        row = self.df.iloc[idx]
-        slide_id = str(row['filename'])
-        y = int(row['_y'])
-        base_no_ext = os.path.splitext(os.path.basename(slide_id))[0]
-        basename = os.path.basename(slide_id)
-        fp = self._file_index.get(basename) or self._file_index.get(base_no_ext) or self._file_index.get(slide_id)
-        if fp is None:
-            raise FileNotFoundError(f"No features for slide_id={slide_id}")
-        # Always load features and sort them by row-major (y,x) using coords
-        feats = _load_features_sorted(fp)
-        if feats.dim() == 1:
-            feats = feats.unsqueeze(0)
-        return feats, y, slide_id
+        sample = self.samples[idx]
+        y = int(sample['label_idx'])
+        slide_paths = sample.get('paths') or []
+        if len(slide_paths) == 0:
+            raise FileNotFoundError(f"No features for sample id={sample['id']}")
+
+        slide_feats: List[torch.Tensor] = []
+        for fp in slide_paths:
+            feats = _load_features_sorted(fp)
+            if feats.dim() == 1:
+                feats = feats.unsqueeze(0)
+            slide_feats.append(feats)
+
+        if self.case_fusion == 'early' and len(slide_feats) > 1:
+            feats_out = torch.cat(slide_feats, dim=0)
+        else:
+            feats_out = slide_feats if len(slide_feats) > 1 else slide_feats[0]
+
+        return feats_out, y, sample['id']

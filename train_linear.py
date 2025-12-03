@@ -55,6 +55,9 @@ def parse_args():
     p.add_argument('--batch_size', type=int, default=64)
     p.add_argument('--balanced_sampling', action='store_true', help='Enable class-balanced sampling for the training loader')
     p.add_argument('--normalize', action='store_true', help='Standardize features via training-set mean/std')
+    p.add_argument('--case_fusion', type=str, default='late', choices=['late', 'early'],
+                   help="How to fuse multiple slides per case when 'case_id'/'slide_ids' are present. "
+                        "'late' (default) averages per-slide embeddings; 'early' behaves identically for linear probes.")
 
     p.add_argument('--output_dir', type=str, default='outputs', help='Root output directory containing runs/ and checkpoints/')
     p.add_argument('--exp_name', type=str, default=None)
@@ -157,14 +160,14 @@ def split_df(df):
 def run_single_fold(args, fold_df: pd.DataFrame, fold_idx: int):
     fold_t0 = time.time()
 
-    base_ds = LinearCSVDataset(csv_path=None, features_dir=args.features_dir, dataframe=fold_df)
+    base_ds = LinearCSVDataset(csv_path=None, features_dir=args.features_dir, dataframe=fold_df, case_fusion=args.case_fusion)
     df = base_ds.df.copy()
     df_train, df_val, df_test = split_df(df)
 
     def make_loader(sub_df, shuffle: bool, balanced: bool = False, *, seed: Optional[int] = None):
         if sub_df is None or len(sub_df) == 0:
             return None, None
-        ds = LinearCSVDataset(csv_path=None, features_dir=args.features_dir, dataframe=sub_df)
+        ds = LinearCSVDataset(csv_path=None, features_dir=args.features_dir, dataframe=sub_df, case_fusion=args.case_fusion)
         labels = ds.df['_y'].to_numpy()
         loader_seed = seed if seed is not None else args.seed
         loader_generator = _make_generator(loader_seed)
