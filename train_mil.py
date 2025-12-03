@@ -24,6 +24,7 @@ from sklearn.metrics import (
 from src.datasets.fold_utils import DEFAULT_SPLIT_SEED, prepare_folds
 from src.datasets.mil_csv_dataset import MILCSVDataset
 from src.builder import create_model, save_model
+from src.metrics_utils import compute_additional_metrics, load_config_metrics
 
 
 def _seed_worker(worker_id: int):
@@ -84,7 +85,7 @@ def _sanitize_key(s: str) -> str:
     return ''.join(ch if ch.isalnum() or ch in ('-', '_') else '_' for ch in s)
 
 
-def evaluate(model, loader, device, num_classes, label_names: Optional[list] = None) -> Tuple[dict, np.ndarray, np.ndarray]:
+def evaluate(model, loader, device, num_classes, label_names: Optional[list] = None, *, extra_metrics: Optional[list] = None) -> Tuple[dict, np.ndarray, np.ndarray]:
     model.eval()
     all_logits = []
     all_labels = []
@@ -176,6 +177,13 @@ def evaluate(model, loader, device, num_classes, label_names: Optional[list] = N
         metrics['roc_auc_macro'] = float('nan')
         metrics['roc_auc_weighted'] = float('nan')
 
+    # Optional custom metrics from config.yaml
+    if extra_metrics:
+        try:
+            metrics.update(compute_additional_metrics(extra_metrics, labels, preds))
+        except Exception:
+            pass
+
     return metrics, logits, labels
 
 
@@ -255,6 +263,7 @@ def forward_with_case_fusion(model, feats, y, *, device, criterion):
 def run_single_fold(args, fold_df: pd.DataFrame, fold_idx: int):
     # Start wall-clock timer for the entire fold (data loading, training, eval, saves)
     fold_t0 = time.time()
+    extra_metrics = list(getattr(args, 'custom_metrics', []) or [])
     # Build datasets
     base_ds = MILCSVDataset(csv_path=None, features_dir=args.features_dir, dataframe=fold_df, case_fusion=args.case_fusion)
 
@@ -365,7 +374,7 @@ def run_single_fold(args, fold_df: pd.DataFrame, fold_idx: int):
         train_loss_epoch = running_loss / max(1, len(train_loader))
         writer.add_scalar('train/loss', train_loss_epoch, epoch)
         # evaluate on training set for metrics tracking
-        train_metrics_eval, _, _ = evaluate(model, eval_train_loader, device, num_classes, label_names=label_names)
+        train_metrics_eval, _, _ = evaluate(model, eval_train_loader, device, num_classes, label_names=label_names, extra_metrics=extra_metrics)
         for k, v in train_metrics_eval.items():
             if k == 'loss':
                 writer.add_scalar('train/loss_eval', v, epoch)
@@ -373,7 +382,7 @@ def run_single_fold(args, fold_df: pd.DataFrame, fold_idx: int):
                 writer.add_scalar(f'train/{k}', v, epoch)
 
         if val_loader is not None:
-            val_metrics, _, _ = evaluate(model, val_loader, device, num_classes, label_names=label_names)
+            val_metrics, _, _ = evaluate(model, val_loader, device, num_classes, label_names=label_names, extra_metrics=extra_metrics)
             for k, v in val_metrics.items():
                 writer.add_scalar(f'val/{k}', v, epoch)
             monitor_val = val_metrics.get(args.monitor.split('/', 1)[-1], float('nan'))
@@ -387,7 +396,7 @@ def run_single_fold(args, fold_df: pd.DataFrame, fold_idx: int):
             best_state = {k: v.detach().cpu() for k, v in model.state_dict().items()}
 
         if test_loader is not None:
-            test_metrics, _, _ = evaluate(model, test_loader, device, num_classes, label_names=label_names)
+            test_metrics, _, _ = evaluate(model, test_loader, device, num_classes, label_names=label_names, extra_metrics=extra_metrics)
             for k, v in test_metrics.items():
                 writer.add_scalar(f'test/{k}', v, epoch)
 
@@ -419,9 +428,9 @@ def run_single_fold(args, fold_df: pd.DataFrame, fold_idx: int):
                                    persistent_workers=(args.num_workers > 0),
                                    worker_init_fn=_seed_worker,
                                    generator=_make_generator(fold_seed + 4))
-    train_metrics, _, _ = evaluate(model, eval_train_loader, device, num_classes, label_names=label_names)
-    val_metrics, _, _ = evaluate(model, val_loader, device, num_classes, label_names=label_names) if val_loader is not None else ({}, None, None)
-    test_metrics, _, _ = evaluate(model, test_loader, device, num_classes, label_names=label_names) if test_loader is not None else ({}, None, None)
+    train_metrics, _, _ = evaluate(model, eval_train_loader, device, num_classes, label_names=label_names, extra_metrics=extra_metrics)
+    val_metrics, _, _ = evaluate(model, val_loader, device, num_classes, label_names=label_names, extra_metrics=extra_metrics) if val_loader is not None else ({}, None, None)
+    test_metrics, _, _ = evaluate(model, test_loader, device, num_classes, label_names=label_names, extra_metrics=extra_metrics) if test_loader is not None else ({}, None, None)
 
     # Fold timing (wall-clock) and logging
     fold_elapsed_s = max(0.0, float(time.time() - fold_t0))
@@ -464,6 +473,7 @@ def run_single_fold(args, fold_df: pd.DataFrame, fold_idx: int):
         },
         # Flat key for simple consumers
         'train_time_hours': float(fold_elapsed_h),
+        'custom_metrics': list(extra_metrics),
     }
     try:
         with open(os.path.join(ckpt_dir, 'best_metrics.json'), 'w') as f:
@@ -478,6 +488,11 @@ def run_single_fold(args, fold_df: pd.DataFrame, fold_idx: int):
 
 def main():
     args = parse_args()
+    custom_metrics, resolved_config_path = load_config_metrics(args.csv_path)
+    args.custom_metrics = tuple(custom_metrics)
+    if custom_metrics:
+        print(f"Detected custom metrics from config ({resolved_config_path}): {custom_metrics}")
+
     run_t0 = time.time()
     os.environ["PYTHONHASHSEED"] = str(args.seed)
     torch.manual_seed(args.seed)
@@ -590,6 +605,8 @@ def main():
             'val': agg_val,
             'test': agg_test,
         },
+        'config_path': resolved_config_path,
+        'custom_metrics': list(custom_metrics),
         'timing': {
             'start_time': datetime.fromtimestamp(run_t0).isoformat(timespec='seconds'),
             'end_time': datetime.fromtimestamp(run_t0 + run_elapsed_s).isoformat(timespec='seconds'),

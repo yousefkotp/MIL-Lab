@@ -26,6 +26,7 @@ from sklearn.metrics import (
 
 from src.datasets.fold_utils import DEFAULT_SPLIT_SEED, prepare_folds
 from src.datasets.linear_csv_dataset import LinearCSVDataset
+from src.metrics_utils import compute_additional_metrics, load_config_metrics
 
 
 def _seed_worker(worker_id: int):
@@ -77,7 +78,7 @@ def _collate(batch):
     return feats, labels, slide_ids
 
 
-def evaluate(model: nn.Module, loader: DataLoader, device, num_classes: int, label_names: Optional[list] = None, *, mean=None, std=None) -> Tuple[dict, np.ndarray, np.ndarray]:
+def evaluate(model: nn.Module, loader: DataLoader, device, num_classes: int, label_names: Optional[list] = None, *, mean=None, std=None, extra_metrics: Optional[list] = None) -> Tuple[dict, np.ndarray, np.ndarray]:
     model.eval()
     all_logits = []
     all_labels = []
@@ -145,6 +146,13 @@ def evaluate(model: nn.Module, loader: DataLoader, device, num_classes: int, lab
         metrics['roc_auc_macro'] = float('nan')
         metrics['roc_auc_weighted'] = float('nan')
 
+    # Optional custom metrics from config.yaml
+    if extra_metrics:
+        try:
+            metrics.update(compute_additional_metrics(extra_metrics, labels, preds))
+        except Exception:
+            pass
+
     return metrics, logits, labels
 
 
@@ -159,6 +167,7 @@ def split_df(df):
 
 def run_single_fold(args, fold_df: pd.DataFrame, fold_idx: int):
     fold_t0 = time.time()
+    extra_metrics = list(getattr(args, 'custom_metrics', []) or [])
 
     base_ds = LinearCSVDataset(csv_path=None, features_dir=args.features_dir, dataframe=fold_df, case_fusion=args.case_fusion)
     df = base_ds.df.copy()
@@ -267,13 +276,13 @@ def run_single_fold(args, fold_df: pd.DataFrame, fold_idx: int):
         writer.add_scalar('train/loss', train_loss_epoch, epoch)
 
         # Evaluate on train/val/test
-        train_metrics_eval, _, _ = evaluate(model, DataLoader(train_ds, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers, collate_fn=_collate), device, num_classes, label_names=label_names, mean=mean, std=std)
+        train_metrics_eval, _, _ = evaluate(model, DataLoader(train_ds, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers, collate_fn=_collate), device, num_classes, label_names=label_names, mean=mean, std=std, extra_metrics=extra_metrics)
         for k, v in train_metrics_eval.items():
             tag = 'train/loss_eval' if k == 'loss' else f'train/{k}'
             writer.add_scalar(tag, v, epoch)
 
         if val_loader is not None:
-            val_metrics, _, _ = evaluate(model, val_loader, device, num_classes, label_names=label_names, mean=mean, std=std)
+            val_metrics, _, _ = evaluate(model, val_loader, device, num_classes, label_names=label_names, mean=mean, std=std, extra_metrics=extra_metrics)
             for k, v in val_metrics.items():
                 writer.add_scalar(f'val/{k}', v, epoch)
             monitor_val = val_metrics.get(args.monitor.split('/', 1)[-1], float('nan'))
@@ -287,7 +296,7 @@ def run_single_fold(args, fold_df: pd.DataFrame, fold_idx: int):
             best_state = {k: v.detach().cpu() for k, v in model.state_dict().items()}
 
         if test_loader is not None:
-            test_metrics, _, _ = evaluate(model, test_loader, device, num_classes, label_names=label_names, mean=mean, std=std)
+            test_metrics, _, _ = evaluate(model, test_loader, device, num_classes, label_names=label_names, mean=mean, std=std, extra_metrics=extra_metrics)
             for k, v in test_metrics.items():
                 writer.add_scalar(f'test/{k}', v, epoch)
 
@@ -305,9 +314,9 @@ def run_single_fold(args, fold_df: pd.DataFrame, fold_idx: int):
         model.load_state_dict(best_state)
 
     eval_train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers, collate_fn=_collate)
-    train_metrics, _, _ = evaluate(model, eval_train_loader, device, num_classes, label_names=label_names, mean=mean, std=std)
-    val_metrics, _, _ = evaluate(model, val_loader, device, num_classes, label_names=label_names, mean=mean, std=std) if val_loader is not None else ({}, None, None)
-    test_metrics, _, _ = evaluate(model, test_loader, device, num_classes, label_names=label_names, mean=mean, std=std) if test_loader is not None else ({}, None, None)
+    train_metrics, _, _ = evaluate(model, eval_train_loader, device, num_classes, label_names=label_names, mean=mean, std=std, extra_metrics=extra_metrics)
+    val_metrics, _, _ = evaluate(model, val_loader, device, num_classes, label_names=label_names, mean=mean, std=std, extra_metrics=extra_metrics) if val_loader is not None else ({}, None, None)
+    test_metrics, _, _ = evaluate(model, test_loader, device, num_classes, label_names=label_names, mean=mean, std=std, extra_metrics=extra_metrics) if test_loader is not None else ({}, None, None)
 
     fold_elapsed_s = max(0.0, float(time.time() - fold_t0))
     fold_elapsed_h = fold_elapsed_s / 3600.0
@@ -343,6 +352,7 @@ def run_single_fold(args, fold_df: pd.DataFrame, fold_idx: int):
             'wall_time_hours': float(fold_elapsed_h),
         },
         'train_time_hours': float(fold_elapsed_h),
+        'custom_metrics': list(extra_metrics),
     }
 
     writer.close()
@@ -351,6 +361,11 @@ def run_single_fold(args, fold_df: pd.DataFrame, fold_idx: int):
 
 def main():
     args = parse_args()
+    custom_metrics, resolved_config_path = load_config_metrics(args.csv_path)
+    args.custom_metrics = tuple(custom_metrics)
+    if custom_metrics:
+        print(f"Detected custom metrics from config ({resolved_config_path}): {custom_metrics}")
+
     os.environ["PYTHONHASHSEED"] = str(args.seed)
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
@@ -443,6 +458,8 @@ def main():
             'val': agg_val,
             'test': agg_test,
         },
+        'config_path': resolved_config_path,
+        'custom_metrics': list(custom_metrics),
         'timing': {
             'start_time': datetime.fromtimestamp(t0).isoformat(timespec='seconds'),
             'end_time': datetime.fromtimestamp(t0 + elapsed_s).isoformat(timespec='seconds'),

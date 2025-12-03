@@ -588,6 +588,18 @@ def _print_latex_across_methods(names: List[str],
     if include_time:
         opt_metrics += ['train_time_hours', 'train_time_total_hours']
     metrics = base_metrics + opt_metrics
+    # Attach any additional metrics observed in results (e.g., config-defined)
+    available_metric_keys: Set[str] = set()
+    for res in results_list:
+        for method in methods:
+            available_metric_keys |= set((res.get(method) or {}).keys())
+    excluded: Set[str] = set(metrics)
+    if not include_embeddings:
+        excluded.add('avg_embeddings_per_wsi')
+    if not include_time:
+        excluded.update({'train_time_hours', 'train_time_total_hours'})
+    extra_metrics = sorted(k for k in available_metric_keys if k and k not in excluded)
+    metrics = metrics + extra_metrics
     # Column spec with vertical rules: |Method|Encoder|metrics...|
     # Adds visual column separators as requested
     colspec = '|' + '|'.join(['l', 'l'] + ['r'] * len(metrics)) + '|'

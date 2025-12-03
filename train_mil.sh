@@ -107,6 +107,7 @@ echo "Feature copy complete."
 # CPU workers: default to SLURM_CPUS_PER_TASK if set, else 6
 NUM_WORKERS="${SLURM_CPUS_PER_TASK:-6}"
 GRAD_ACCUM_STEPS="${GRAD_ACCUM_STEPS:-1}"
+EXTRA_FLAGS=(--balanced_sampling)
 
 echo "Starting training (writing outputs under ${TMP_OUTPUT_DIR})"
 python train_mil.py \
@@ -117,6 +118,6 @@ python train_mil.py \
     --num_workers "${NUM_WORKERS}" \
     --output_dir "${TMP_OUTPUT_DIR}" \
     --grad_accum_steps "${GRAD_ACCUM_STEPS}" \
-    --balanced_sampling
+    "${EXTRA_FLAGS[@]}"
 
 # Stage-back also happens through the EXIT trap; nothing else to do.
