@@ -29,6 +29,7 @@ cd "${REPO_ROOT_DIR}"
 #
 MODEL="${MODEL:-abmil.base.slide_hubert.none}"
 FEATURES_SRC_DIR="${FEATURES_SRC_DIR:-/home/mila/k/kotpy/scratch/datasets/CAMELYON17/slide_hubert/20x_512px/clusters_5000_10000_steps_20K_average_overlaps}"
+FEATURES_PARENT_DIR="${FEATURES_PARENT_DIR:-}"
 CSV_PATH="${CSV_PATH:-}"  # required: single CSV with filename,label[,case_id]
 NUM_FOLDS="${NUM_FOLDS:-5}"
 
@@ -38,6 +39,10 @@ if [[ -z "${CSV_PATH}" ]]; then
 fi
 if [[ ! -f "${CSV_PATH}" ]]; then
   echo "Error: CSV_PATH does not exist: ${CSV_PATH}" >&2
+  exit 1
+fi
+if [[ -z "${FEATURES_PARENT_DIR}" ]]; then
+  echo "Error: FEATURES_PARENT_DIR is not set. Provide the directory name containing .h5 features (e.g., features_lunit-vits8)." >&2
   exit 1
 fi
 
@@ -89,6 +94,7 @@ TMP_OUTPUT_DIR="${RUN_TMPDIR}/output"
 echo "Using SLURM_TMPDIR: ${SLURM_TMPDIR}"
 echo "Run scratch: ${RUN_TMPDIR}"
 echo "CSV path: ${CSV_PATH}"
+echo "Features parent dir: ${FEATURES_PARENT_DIR}"
 echo "Config path: ${CONFIG_PATH}"
 echo "Dataset: ${DATASET} | Task: ${TASK}"
 echo "Folds: ${NUM_FOLDS}"
@@ -122,6 +128,7 @@ python train_mil.py \
     --config_path "${CONFIG_PATH}" \
     --num_folds "${NUM_FOLDS}" \
     --features_dir "${TMP_FEATURES_DIR}" \
+    --feature_parent_dir "${FEATURES_PARENT_DIR}" \
     --model "${MODEL}" \
     --num_workers "${NUM_WORKERS}" \
     --output_dir "${TMP_OUTPUT_DIR}" \

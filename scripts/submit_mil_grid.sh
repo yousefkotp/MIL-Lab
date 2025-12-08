@@ -46,8 +46,9 @@ MODELS=(
 
 # Feature directories to iterate (absolute paths)
 FEATURE_DIRS=(
-  /home/kotpaz/projects/rrg-msh/kotpaz/datasets/iBOT_training/BC_therapy/20x_512px_0px_overlap/features_lunit-vits8
+  /home/kotpaz/projects/rrg-msh/kotpaz/datasets/iBOT_training/
 )
+FEATURES_PARENT_DIR="features_lunit-vits8"
 
 # /home/kotpaz/projects/rrg-msh/kotpaz/datasets/iBOT_training/trained_models/0x_cls_mean_11000_16x16_step_16x16
 
@@ -106,7 +107,7 @@ for fdir in "${FEATURE_DIRS[@]}"; do
 
       echo "sbatch --job-name ${job_name} (features=${feat_base}, dataset=${dataset_name}, task=${task_name}, model=${model})"
       sbatch --job-name "${job_name}" \
-        --export=ALL,REPO_ROOT="${REPO_ROOT}",FEATURES_SRC_DIR="${fdir_noslash}",MODEL="${model}",DATASET="${dataset_name}",TASK="${task_name}",OUTPUT_DIR="${out_dir}",GRAD_ACCUM_STEPS="${GRAD_ACCUM_STEPS}",CSV_PATH="${csv_path}",NUM_FOLDS="${NUM_FOLDS}" \
+        --export=ALL,REPO_ROOT="${REPO_ROOT}",FEATURES_SRC_DIR="${fdir_noslash}",FEATURES_PARENT_DIR="${FEATURES_PARENT_DIR}",MODEL="${model}",DATASET="${dataset_name}",TASK="${task_name}",OUTPUT_DIR="${out_dir}",GRAD_ACCUM_STEPS="${GRAD_ACCUM_STEPS}",CSV_PATH="${csv_path}",NUM_FOLDS="${NUM_FOLDS}" \
         "${LAUNCH_SCRIPT}"
     done
   done

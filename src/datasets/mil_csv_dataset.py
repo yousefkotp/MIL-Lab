@@ -10,11 +10,12 @@ from torch.utils.data import Dataset
 logger = logging.getLogger(__name__)
 
 
-def _index_feature_files(root: str, exts: Tuple[str, ...], target_stems: Set[str]) -> Dict[str, str]:
+def _index_feature_files(root: str, exts: Tuple[str, ...], target_stems: Set[str], parent_dir_name: str) -> Dict[str, str]:
     """Index feature files under ``root`` only for the requested stems.
 
     Stems are the basename without extension from the CSV (e.g., `patient_001_node_0`).
-    Search is recursive so embeddings can live in nested subdirectories.
+    Search is recursive so embeddings can live in nested subdirectories, but only files whose
+    immediate parent directory name matches ``parent_dir_name`` are considered.
     """
     root = os.path.abspath(os.path.expanduser(root))
     if not os.path.isdir(root):
@@ -22,8 +23,11 @@ def _index_feature_files(root: str, exts: Tuple[str, ...], target_stems: Set[str
 
     stems_lower = {s.lower() for s in target_stems}
     index: Dict[str, str] = {}
+    seen: Set[str] = set()  # lowercased stems already indexed
     lower_exts = tuple(ext.lower() for ext in exts)
     for dirpath, _, filenames in os.walk(root):
+        if os.path.basename(dirpath) != parent_dir_name:
+            continue
         for fname in filenames:
             if not fname.lower().endswith(lower_exts):
                 continue
@@ -32,6 +36,11 @@ def _index_feature_files(root: str, exts: Tuple[str, ...], target_stems: Set[str
             base_no_ext = os.path.splitext(basename)[0]
             if base_no_ext.lower() not in stems_lower:
                 continue
+            stem_key = base_no_ext.lower()
+            if stem_key in seen:
+                # Skip duplicates silently; first occurrence wins
+                continue
+            seen.add(stem_key)
             index[base_no_ext] = fp  # stem key
             index[basename] = fp     # embedding basename (e.g., .h5)
     return index
@@ -118,6 +127,7 @@ class MILCSVDataset(Dataset):
         allowed_exts: Tuple[str, ...] = ('.h5', '.hdf5'),
         dataframe: Optional[pd.DataFrame] = None,
         sample_col: str = 'case_id',
+        feature_parent_dir: str = '',
         case_fusion: str = 'late',
     ):
         """
@@ -137,6 +147,10 @@ class MILCSVDataset(Dataset):
         if sample_col_norm not in ('filename', 'case_id'):
             raise ValueError(f"sample_col must be 'filename' or 'case_id', got {sample_col}")
         self.sample_col = sample_col_norm
+        feature_parent_dir = str(feature_parent_dir).strip()
+        if not feature_parent_dir:
+            raise ValueError("feature_parent_dir must be provided (e.g., 'features_lunit-vits8').")
+        self.feature_parent_dir = feature_parent_dir
 
         if dataframe is not None:
             df = dataframe.copy()
@@ -262,7 +276,7 @@ class MILCSVDataset(Dataset):
             base_no_ext = os.path.splitext(base)[0]
             target_stems.add(base_no_ext)
 
-        self._file_index = _index_feature_files(self.features_dir, self.allowed_exts, target_stems=target_stems)
+        self._file_index = _index_feature_files(self.features_dir, self.allowed_exts, target_stems=target_stems, parent_dir_name=self.feature_parent_dir)
 
         # Filter out samples whose slides are missing
         filtered_samples: List[dict] = []

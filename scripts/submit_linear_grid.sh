@@ -32,8 +32,9 @@ NUM_FOLDS="${NUM_FOLDS:-5}"
 # Feature directories to iterate (absolute paths)
 # Update these with the actual per-WSI vector features ('.h5'/'hdf5' with dataset 'features')
 FEATURE_DIRS=(
-  /home/kotpaz/projects/rrg-msh/kotpaz/datasets/iBOT_training/trained_models/grid_whole_slide_cls_mean
+  /home/kotpaz/projects/rrg-msh/kotpaz/datasets/iBOT_training
 )
+FEATURES_PARENT_DIR="grid_whole_slide_cls_mean"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${SCRIPT_DIR%/scripts}"
@@ -63,7 +64,7 @@ for csv_path in "${CSV_PATHS[@]}"; do
 
     echo "sbatch --job-name ${job_name} (features=${feat_base}, dataset=${dataset_name}, task=${task_name})"
     sbatch --job-name "${job_name}" \
-      --export=ALL,REPO_ROOT="${REPO_ROOT}",FEATURES_SRC_DIR="${fdir_noslash}",DATASET="${dataset_name}",TASK="${task_name}",OUTPUT_DIR="${out_dir}",EPOCHS="${EPOCHS}",LR="${LR}",WEIGHT_DECAY="${WEIGHT_DECAY}",BATCH_SIZE="${BATCH_SIZE}",NUM_WORKERS="${NUM_WORKERS}",BALANCED_SAMPLING="${BALANCED_SAMPLING}",NORMALIZE="${NORMALIZE}",CSV_PATH="${csv_path}",NUM_FOLDS="${NUM_FOLDS}" \
+      --export=ALL,REPO_ROOT="${REPO_ROOT}",FEATURES_SRC_DIR="${fdir_noslash}",FEATURES_PARENT_DIR="${FEATURES_PARENT_DIR}",DATASET="${dataset_name}",TASK="${task_name}",OUTPUT_DIR="${out_dir}",EPOCHS="${EPOCHS}",LR="${LR}",WEIGHT_DECAY="${WEIGHT_DECAY}",BATCH_SIZE="${BATCH_SIZE}",NUM_WORKERS="${NUM_WORKERS}",BALANCED_SAMPLING="${BALANCED_SAMPLING}",NORMALIZE="${NORMALIZE}",CSV_PATH="${csv_path}",NUM_FOLDS="${NUM_FOLDS}" \
       "${LAUNCH_SCRIPT}"
   done
 done

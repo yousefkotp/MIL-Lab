@@ -34,6 +34,7 @@ cd "${REPO_ROOT_DIR}"
 export CUBLAS_WORKSPACE_CONFIG="${CUBLAS_WORKSPACE_CONFIG:-:4096:8}"
 
 FEATURES_SRC_DIR="${FEATURES_SRC_DIR:-}"   # should be absolute path
+FEATURES_PARENT_DIR="${FEATURES_PARENT_DIR:-}"
 CSV_PATH="${CSV_PATH:-}"  # required: single CSV with filename,label[,case_id]
 NUM_FOLDS="${NUM_FOLDS:-5}"
 
@@ -47,6 +48,10 @@ if [[ -z "${CSV_PATH}" ]]; then
 fi
 if [[ ! -f "${CSV_PATH}" ]]; then
   echo "ERROR: CSV_PATH does not exist: ${CSV_PATH}" >&2
+  exit 1
+fi
+if [[ -z "${FEATURES_PARENT_DIR}" ]]; then
+  echo "ERROR: FEATURES_PARENT_DIR is not set. Provide the directory name containing .h5 features (e.g., features_lunit-vits8)." >&2
   exit 1
 fi
 
@@ -98,6 +103,7 @@ TMP_OUTPUT_DIR="${RUN_TMPDIR}/output"
 echo "Using SLURM_TMPDIR: ${SLURM_TMPDIR}"
 echo "Run scratch: ${RUN_TMPDIR}"
 echo "CSV path: ${CSV_PATH}"
+echo "Features parent dir: ${FEATURES_PARENT_DIR}"
 echo "Config path: ${CONFIG_PATH}"
 echo "Dataset: ${DATASET} | Task: ${TASK}"
 echo "Folds: ${NUM_FOLDS}"
@@ -132,6 +138,7 @@ python train_linear.py \
   --config_path "${CONFIG_PATH}" \
   --num_folds "${NUM_FOLDS}" \
   --features_dir "${TMP_FEATURES_DIR}" \
+  --feature_parent_dir "${FEATURES_PARENT_DIR}" \
   --epochs "${EPOCHS}" \
   --lr "${LR}" \
   --weight_decay "${WEIGHT_DECAY}" \

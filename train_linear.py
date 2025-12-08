@@ -48,6 +48,7 @@ def parse_args():
     p.add_argument('--num_folds', type=int, default=5, help='Number of stratified folds (val ≈ 1/num_folds; train uses the rest). Only train/val splits are created.')
     p.add_argument('--split_seed', type=int, default=DEFAULT_SPLIT_SEED, help='Seed used only for data split so folds stay identical across runs')
     p.add_argument('--features_dir', type=str, required=True, help='Root directory containing per-slide feature files')
+    p.add_argument('--feature_parent_dir', type=str, required=True, help="Name of the parent directory that contains the .h5 feature files when searching recursively (e.g., 'features_lunit-vits8')")
     p.add_argument('--seed', type=int, default=42)
 
     p.add_argument('--epochs', type=int, default=200)
@@ -170,14 +171,14 @@ def run_single_fold(args, fold_df: pd.DataFrame, fold_idx: int):
     fold_t0 = time.time()
     extra_metrics = list(getattr(args, 'custom_metrics', []) or [])
 
-    base_ds = LinearCSVDataset(csv_path=None, features_dir=args.features_dir, dataframe=fold_df, case_fusion=args.case_fusion, sample_col=args.sample_col)
+    base_ds = LinearCSVDataset(csv_path=None, features_dir=args.features_dir, dataframe=fold_df, case_fusion=args.case_fusion, sample_col=args.sample_col, feature_parent_dir=args.feature_parent_dir)
     df = base_ds.df.copy()
     df_train, df_val, df_test = split_df(df)
 
     def make_loader(sub_df, shuffle: bool, balanced: bool = False, *, seed: Optional[int] = None):
         if sub_df is None or len(sub_df) == 0:
             return None, None
-        ds = LinearCSVDataset(csv_path=None, features_dir=args.features_dir, dataframe=sub_df, case_fusion=args.case_fusion, sample_col=args.sample_col)
+        ds = LinearCSVDataset(csv_path=None, features_dir=args.features_dir, dataframe=sub_df, case_fusion=args.case_fusion, sample_col=args.sample_col, feature_parent_dir=args.feature_parent_dir)
         labels = ds.df['_y'].to_numpy()
         loader_seed = seed if seed is not None else args.seed
         loader_generator = _make_generator(loader_seed)
