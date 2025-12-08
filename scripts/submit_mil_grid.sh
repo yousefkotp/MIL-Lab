@@ -7,6 +7,54 @@ CSV_PATHS=(
   /home/kotpaz/scratch/tasks/custom/bc_therapy/grade/task.csv
   /home/kotpaz/scratch/tasks/custom/bc_therapy/her2_status/task.csv
   /home/kotpaz/scratch/tasks/custom/bc_therapy/residual_cancer_burden/task.csv
+  /home/kotpaz/scratch/tasks/custom/bracs/coarse/task.csv
+  /home/kotpaz/scratch/tasks/custom/bracs/fine/task.csv
+  /home/kotpaz/scratch/tasks/custom/camelyon17/breast_cancer_metastases/task.csv
+  /home/kotpaz/scratch/tasks/custom/cptac_brca/Immune_class/task.csv
+  /home/kotpaz/scratch/tasks/custom/cptac_brca/PIK3CA_mutation/task.csv
+  /home/kotpaz/scratch/tasks/custom/cptac_brca/TP53_mutation/task.csv
+  /home/kotpaz/scratch/tasks/custom/cptac_ccrcc/BAP1_mutation/task.csv
+  /home/kotpaz/scratch/tasks/custom/cptac_ccrcc/Immune_class/task.csv
+  /home/kotpaz/scratch/tasks/custom/cptac_ccrcc/PBRM1_mutation/task.csv
+  /home/kotpaz/scratch/tasks/custom/cptac_ccrcc/VHL_mutation/task.csv
+  /home/kotpaz/scratch/tasks/custom/cptac_coad/ACVR2A_mutation/task.csv
+  /home/kotpaz/scratch/tasks/custom/cptac_coad/APC_mutation/task.csv
+  /home/kotpaz/scratch/tasks/custom/cptac_coad/ARID1A_mutation/task.csv
+  /home/kotpaz/scratch/tasks/custom/cptac_coad/Immune_class/task.csv
+  /home/kotpaz/scratch/tasks/custom/cptac_coad/KRAS_mutation/task.csv
+  /home/kotpaz/scratch/tasks/custom/cptac_coad/MSI_H/task.csv
+  /home/kotpaz/scratch/tasks/custom/cptac_coad/PIK3CA_mutation/task.csv
+  /home/kotpaz/scratch/tasks/custom/cptac_coad/SETD1B_mutation/task.csv
+  /home/kotpaz/scratch/tasks/custom/cptac_coad/TP53_mutation/task.csv
+  /home/kotpaz/scratch/tasks/custom/cptac_gbm/EGFR_mutation/task.csv
+  /home/kotpaz/scratch/tasks/custom/cptac_gbm/Immune_class/task.csv
+  /home/kotpaz/scratch/tasks/custom/cptac_gbm/TP53_mutation/task.csv
+  /home/kotpaz/scratch/tasks/custom/cptac_hnsc/CASP8_mutation/task.csv
+  /home/kotpaz/scratch/tasks/custom/cptac_hnsc/Histologic_Grade/task.csv
+  /home/kotpaz/scratch/tasks/custom/cptac_hnsc/Immune_class/task.csv
+  /home/kotpaz/scratch/tasks/custom/cptac_lscc/ARID1A_mutation/task.csv
+  /home/kotpaz/scratch/tasks/custom/cptac_lscc/Histologic_Grade/task.csv
+  /home/kotpaz/scratch/tasks/custom/cptac_lscc/Immune_class/task.csv
+  /home/kotpaz/scratch/tasks/custom/cptac_lscc/KEAP1_mutation/task.csv
+  /home/kotpaz/scratch/tasks/custom/cptac_luad/EGFR_mutation/task.csv
+  /home/kotpaz/scratch/tasks/custom/cptac_luad/Immune_class/task.csv
+  /home/kotpaz/scratch/tasks/custom/cptac_luad/KRAS_mutation/task.csv
+  /home/kotpaz/scratch/tasks/custom/cptac_luad/STK11_mutation/task.csv
+  /home/kotpaz/scratch/tasks/custom/cptac_luad/TP53_mutation/task.csv
+  /home/kotpaz/scratch/tasks/custom/cptac_ov/Immune_class/task.csv
+  /home/kotpaz/scratch/tasks/custom/cptac_pda/Immune_class/task.csv
+  /home/kotpaz/scratch/tasks/custom/cptac_pda/SMAD4_mutation/task.csv
+  /home/kotpaz/scratch/tasks/custom/cptac_ucec/CTNNB1_mutation/task.csv
+  /home/kotpaz/scratch/tasks/custom/cptac_ucec/Immune_class/task.csv
+  /home/kotpaz/scratch/tasks/custom/cptac_ucec/PTEN_mutation/task.csv
+  /home/kotpaz/scratch/tasks/custom/dhmc_kidney/morphological_subtyping/task.csv
+  /home/kotpaz/scratch/tasks/custom/dhmc_luad/histologic_pattern/task.csv
+  /home/kotpaz/scratch/tasks/custom/ebrains/diagnosis/task.csv
+  /home/kotpaz/scratch/tasks/custom/ebrains/diagnosis_group/task.csv
+  /home/kotpaz/scratch/tasks/custom/ebrains/idh_status/task.csv
+  /home/kotpaz/scratch/tasks/custom/imp/grade/task.csv
+  /home/kotpaz/scratch/tasks/custom/mbc/treatment_response/task.csv
+  /home/kotpaz/scratch/tasks/custom/panda/prostate_cancer_grade/task.csv
 )
 if [[ ${#CSV_PATHS[@]} -eq 0 ]]; then
   echo "CSV_PATHS must list at least one task CSV (format: .../<dataset>/<task>/task.csv)." >&2

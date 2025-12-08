@@ -4,8 +4,8 @@
 #SBATCH --cpus-per-task 6
 #SBATCH --gres=gpu:nvidia_h100_80gb_hbm3_2g.20gb:1
 #SBATCH --time=2-00:00:00
-#SBATCH --output=/home/kotpaz/scratch/MIL-Lab/logs/output/%x_%j.txt
-#SBATCH --error=/home/kotpaz/scratch/MIL-Lab/logs/error/%x_%j.txt
+#SBATCH --output=logs/output/%x_%j.txt
+#SBATCH --error=logs/error/%x_%j.txt
 #SBATCH --mem=64G
 #SBATCH --account=def-msh-ab
 
@@ -27,10 +27,10 @@ cd "${REPO_ROOT_DIR}"
 # - CSV_PATH: path to the single CSV containing columns case_id (optional), filename, label
 # - NUM_FOLDS: number of folds to create from CSV (default: 5)
 #
-MODEL="${MODEL:-abmil.base.slide_hubert.none}"
-FEATURES_SRC_DIR="${FEATURES_SRC_DIR:-/home/mila/k/kotpy/scratch/datasets/CAMELYON17/slide_hubert/20x_512px/clusters_5000_10000_steps_20K_average_overlaps}"
+MODEL="${MODEL:-}"
+FEATURES_SRC_DIR="${FEATURES_SRC_DIR:-}"
 FEATURES_PARENT_DIR="${FEATURES_PARENT_DIR:-}"
-CSV_PATH="${CSV_PATH:-}"  # required: single CSV with filename,label[,case_id]
+CSV_PATH="${CSV_PATH:-}"
 NUM_FOLDS="${NUM_FOLDS:-5}"
 
 if [[ -z "${CSV_PATH}" ]]; then
@@ -43,6 +43,14 @@ if [[ ! -f "${CSV_PATH}" ]]; then
 fi
 if [[ -z "${FEATURES_PARENT_DIR}" ]]; then
   echo "Error: FEATURES_PARENT_DIR is not set. Provide the directory name containing .h5 features (e.g., features_lunit-vits8)." >&2
+  exit 1
+fi
+if [[ -z "${FEATURES_SRC_DIR}" ]]; then
+  echo "Error: FEATURES_SRC_DIR is not set. Provide absolute path to the feature root directory." >&2
+  exit 1
+fi
+if [[ ! -d "${FEATURES_SRC_DIR}" ]]; then
+  echo "Error: FEATURES_SRC_DIR does not exist or is not a directory: ${FEATURES_SRC_DIR}" >&2
   exit 1
 fi
 
@@ -112,10 +120,47 @@ stage_back() {
 }
 trap stage_back EXIT
 
-echo "Copying features from ${FEATURES_SRC_DIR} to ${TMP_FEATURES_DIR} ..."
-# Copy contents (not the directory wrapper)
-cp -a "${FEATURES_SRC_DIR%/}/." "${TMP_FEATURES_DIR}/"
-echo "Feature copy complete."
+echo "Collecting required feature files (parent dir=${FEATURES_PARENT_DIR})..."
+FEATURE_MANIFEST="${RUN_TMPDIR}/feature_manifest.tsv"
+python - "${CSV_PATH}" "${CONFIG_PATH}" "${FEATURES_SRC_DIR}" "${FEATURES_PARENT_DIR}" "mil" <<'PY' > "${FEATURE_MANIFEST}"
+import os
+import sys
+from src.metrics_utils import load_config_metrics
+from src.datasets.mil_csv_dataset import MILCSVDataset
+from src.datasets.linear_csv_dataset import LinearCSVDataset
+
+csv_path, config_path, features_dir, parent_dir, mode = sys.argv[1:6]
+_, sample_col, _ = load_config_metrics(csv_path=csv_path, config_path=config_path)
+ds_cls = MILCSVDataset if mode == 'mil' else LinearCSVDataset
+ds = ds_cls(csv_path=csv_path, features_dir=features_dir, sample_col=sample_col, feature_parent_dir=parent_dir)
+unique_paths = sorted({os.path.abspath(p) for s in ds.samples for p in s.get('paths', [])})
+if not unique_paths:
+    sys.stderr.write("No matching feature files found for requested samples.\n")
+    sys.exit(1)
+root = os.path.abspath(os.path.expanduser(features_dir))
+for p in unique_paths:
+    common = os.path.commonpath([root, p])
+    if common != root:
+        raise RuntimeError(f"Feature path {p} is outside features_dir {root}")
+    rel = os.path.relpath(p, root)
+    print(f"{p}\t{rel}")
+PY
+
+mapfile -t FEATURE_LINES < "${FEATURE_MANIFEST}"
+if [[ ${#FEATURE_LINES[@]} -eq 0 ]]; then
+  echo "Error: No feature files found for CSV ${CSV_PATH} under ${FEATURES_SRC_DIR} with parent ${FEATURES_PARENT_DIR}" >&2
+  exit 1
+fi
+
+COPIED=0
+for line in "${FEATURE_LINES[@]}"; do
+  IFS=$'\t' read -r src rel <<<"${line}"
+  dest="${TMP_FEATURES_DIR%/}/${rel}"
+  mkdir -p "$(dirname "${dest}")"
+  cp "${src}" "${dest}"
+  ((COPIED++))
+done
+echo "Feature subset copy complete: ${COPIED} files staged."
 
 # CPU workers: default to SLURM_CPUS_PER_TASK if set, else 6
 NUM_WORKERS="${SLURM_CPUS_PER_TASK:-6}"
