@@ -28,6 +28,7 @@ set -euo pipefail
 # Resolve and move to repo root (prefer exported REPO_ROOT)
 REPO_ROOT_DIR="${REPO_ROOT:-${SLURM_SUBMIT_DIR:-${PWD}}}"
 cd "${REPO_ROOT_DIR}"
+export PYTHONPATH="${REPO_ROOT_DIR}:${PYTHONPATH:-}"
 
 # Ensure deterministic CuBLAS choice when PyTorch enables deterministic algorithms
 # See: https://docs.nvidia.com/cuda/cublas/index.html#results-reproducibility
@@ -125,35 +126,37 @@ trap stage_back EXIT
 
 echo "Collecting required feature files (parent dir=${FEATURES_PARENT_DIR})..."
 FEATURE_MANIFEST="${RUN_TMPDIR}/feature_manifest.tsv"
-python - "${CSV_PATH}" "${CONFIG_PATH}" "${FEATURES_SRC_DIR}" "${FEATURES_PARENT_DIR}" "linear" <<'PY' > "${FEATURE_MANIFEST}"
-import os
-import sys
-from src.metrics_utils import load_config_metrics
-from src.datasets.mil_csv_dataset import MILCSVDataset
-from src.datasets.linear_csv_dataset import LinearCSVDataset
+FEATURE_MANIFEST_ERR="${RUN_TMPDIR}/feature_manifest.err"
+set +e
+python scripts/build_feature_manifest.py \
+  --csv_path "${CSV_PATH}" \
+  --config_path "${CONFIG_PATH}" \
+  --features_dir "${FEATURES_SRC_DIR}" \
+  --parent_dir "${FEATURES_PARENT_DIR}" \
+  --mode linear \
+  > "${FEATURE_MANIFEST}" 2> "${FEATURE_MANIFEST_ERR}"
+MANIFEST_STATUS=$?
+set -e
+if [[ ${MANIFEST_STATUS} -ne 0 ]]; then
+  echo "Error: Failed to build feature manifest. See ${FEATURE_MANIFEST_ERR} for details." >&2
+  cat "${FEATURE_MANIFEST_ERR}" >&2 || true
+  exit 1
+fi
 
-csv_path, config_path, features_dir, parent_dir, mode = sys.argv[1:6]
-_, sample_col, _ = load_config_metrics(csv_path=csv_path, config_path=config_path)
-ds_cls = MILCSVDataset if mode == 'mil' else LinearCSVDataset
-ds = ds_cls(csv_path=csv_path, features_dir=features_dir, sample_col=sample_col, feature_parent_dir=parent_dir)
-unique_paths = sorted({os.path.abspath(p) for s in ds.samples for p in s.get('paths', [])})
-if not unique_paths:
-    sys.stderr.write("No matching feature files found for requested samples.\n")
-    sys.exit(1)
-root = os.path.abspath(os.path.expanduser(features_dir))
-for p in unique_paths:
-    common = os.path.commonpath([root, p])
-    if common != root:
-        raise RuntimeError(f"Feature path {p} is outside features_dir {root}")
-    rel = os.path.relpath(p, root)
-    print(f"{p}\t{rel}")
-PY
+if [[ ! -s "${FEATURE_MANIFEST}" ]]; then
+  echo "Error: Feature manifest is empty; no files selected for copy." >&2
+  [[ -s "${FEATURE_MANIFEST_ERR}" ]] && cat "${FEATURE_MANIFEST_ERR}" >&2 || true
+  exit 1
+fi
 
 mapfile -t FEATURE_LINES < "${FEATURE_MANIFEST}"
 if [[ ${#FEATURE_LINES[@]} -eq 0 ]]; then
   echo "Error: No feature files found for CSV ${CSV_PATH} under ${FEATURES_SRC_DIR} with parent ${FEATURES_PARENT_DIR}" >&2
+  [[ -s "${FEATURE_MANIFEST_ERR}" ]] && cat "${FEATURE_MANIFEST_ERR}" >&2 || true
   exit 1
 fi
+echo "Manifest built with ${#FEATURE_LINES[@]} files."
+cp "${FEATURE_MANIFEST}" "${TMP_OUTPUT_DIR}/feature_manifest.tsv" || true
 
 COPIED=0
 for line in "${FEATURE_LINES[@]}"; do
@@ -161,7 +164,7 @@ for line in "${FEATURE_LINES[@]}"; do
   dest="${TMP_FEATURES_DIR%/}/${rel}"
   mkdir -p "$(dirname "${dest}")"
   cp "${src}" "${dest}"
-  ((COPIED++))
+  ((++COPIED))
 done
 echo "Feature subset copy complete: ${COPIED} files staged."
 
