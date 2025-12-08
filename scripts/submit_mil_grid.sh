@@ -3,7 +3,10 @@ set -euo pipefail
 
 # Define tasks (format: .../<dataset>/<task>/task.csv)
 CSV_PATHS=(
+  /home/kotpaz/scratch/tasks/custom/bc_therapy/er_status/task.csv
   /home/kotpaz/scratch/tasks/custom/bc_therapy/grade/task.csv
+  /home/kotpaz/scratch/tasks/custom/bc_therapy/her2_status/task.csv
+  /home/kotpaz/scratch/tasks/custom/bc_therapy/residual_cancer_burden/task.csv
 )
 if [[ ${#CSV_PATHS[@]} -eq 0 ]]; then
   echo "CSV_PATHS must list at least one task CSV (format: .../<dataset>/<task>/task.csv)." >&2
@@ -23,14 +26,9 @@ NUM_FOLDS="${NUM_FOLDS:-5}"
 MODELS=(
   abmil.base.slide_hubert_base.none
   clam.base_subtyping.slide_hubert_base.none
-  dftd.base.slide_hubert_base.none
   dsmil.base.slide_hubert_base.none
-  ilra.base.slide_hubert_base.none
   meanmil.base.slide_hubert_base.none
-  rrt.base.slide_hubert_base.none
-  transformer.base.slide_hubert_base.none
   transmil.base.slide_hubert_base.none
-  wikg.base.slide_hubert_base.none
 )
 
 # MODELS=(
@@ -48,11 +46,10 @@ MODELS=(
 
 # Feature directories to iterate (absolute paths)
 FEATURE_DIRS=(
-  /home/mila/k/kotpy/scratch/datasets/CAMELYON17/slide_hubert/mean
-  /home/mila/k/kotpy/scratch/datasets/CAMELYON17/slide_hubert/mean_l2
-  /home/mila/k/kotpy/scratch/datasets/CAMELYON17/slide_hubert/cls
-  /home/mila/k/kotpy/scratch/datasets/CAMELYON17/slide_hubert/cls_l2
+  /home/kotpaz/projects/rrg-msh/kotpaz/datasets/iBOT_training/BC_therapy/20x_512px_0px_overlap/features_lunit-vits8
 )
+
+# /home/kotpaz/projects/rrg-msh/kotpaz/datasets/iBOT_training/trained_models/0x_cls_mean_11000_16x16_step_16x16
 
 # uni_v1
 # uni_v2

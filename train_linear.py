@@ -44,6 +44,7 @@ def _make_generator(seed: int) -> torch.Generator:
 def parse_args():
     p = argparse.ArgumentParser(description="Train linear probe on per-WSI vector features (.h5 with 'features'=(D,))")
     p.add_argument('--csv_path', type=str, required=True, help='Single CSV with columns: filename,label[,case_id]; if case_id is present, all slides from a case are kept in the same fold')
+    p.add_argument('--config_path', type=str, default=None, help='Path to task config.yaml (defaults to <csv_dir>/config.yaml). Must define sample_col.')
     p.add_argument('--num_folds', type=int, default=5, help='Number of stratified folds (val ≈ 1/num_folds; train uses the rest). Only train/val splits are created.')
     p.add_argument('--split_seed', type=int, default=DEFAULT_SPLIT_SEED, help='Seed used only for data split so folds stay identical across runs')
     p.add_argument('--features_dir', type=str, required=True, help='Root directory containing per-slide feature files')
@@ -169,14 +170,14 @@ def run_single_fold(args, fold_df: pd.DataFrame, fold_idx: int):
     fold_t0 = time.time()
     extra_metrics = list(getattr(args, 'custom_metrics', []) or [])
 
-    base_ds = LinearCSVDataset(csv_path=None, features_dir=args.features_dir, dataframe=fold_df, case_fusion=args.case_fusion)
+    base_ds = LinearCSVDataset(csv_path=None, features_dir=args.features_dir, dataframe=fold_df, case_fusion=args.case_fusion, sample_col=args.sample_col)
     df = base_ds.df.copy()
     df_train, df_val, df_test = split_df(df)
 
     def make_loader(sub_df, shuffle: bool, balanced: bool = False, *, seed: Optional[int] = None):
         if sub_df is None or len(sub_df) == 0:
             return None, None
-        ds = LinearCSVDataset(csv_path=None, features_dir=args.features_dir, dataframe=sub_df, case_fusion=args.case_fusion)
+        ds = LinearCSVDataset(csv_path=None, features_dir=args.features_dir, dataframe=sub_df, case_fusion=args.case_fusion, sample_col=args.sample_col)
         labels = ds.df['_y'].to_numpy()
         loader_seed = seed if seed is not None else args.seed
         loader_generator = _make_generator(loader_seed)
@@ -361,10 +362,12 @@ def run_single_fold(args, fold_df: pd.DataFrame, fold_idx: int):
 
 def main():
     args = parse_args()
-    custom_metrics, resolved_config_path = load_config_metrics(args.csv_path)
+    custom_metrics, sample_col, resolved_config_path = load_config_metrics(args.csv_path, config_path=args.config_path)
     args.custom_metrics = tuple(custom_metrics)
+    args.sample_col = sample_col
     if custom_metrics:
         print(f"Detected custom metrics from config ({resolved_config_path}): {custom_metrics}")
+    print(f"Using sample_col='{sample_col}' from config at {resolved_config_path}")
 
     os.environ["PYTHONHASHSEED"] = str(args.seed)
     torch.manual_seed(args.seed)
@@ -385,6 +388,7 @@ def main():
             csv_path=args.csv_path,
             num_folds=args.num_folds,
             split_seed=args.split_seed,
+            sample_col=args.sample_col,
         )
     except ValueError as exc:
         raise SystemExit(str(exc))

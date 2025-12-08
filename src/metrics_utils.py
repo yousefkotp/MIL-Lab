@@ -26,25 +26,32 @@ def _normalize_metric_name(name: str) -> str:
     return norm.strip('_')
 
 
-def load_config_metrics(csv_path: str, config_path: Optional[str] = None) -> Tuple[List[str], Optional[str]]:
-    """Load optional custom metrics from a task config.yaml located next to the CSV.
+def load_config_metrics(csv_path: str, config_path: Optional[str] = None) -> Tuple[List[str], str, str]:
+    """Load required task config.yaml next to the CSV (or at an explicit path).
 
-    Returns (metric_names, resolved_config_path). Metric names are normalized.
-    Missing or unreadable config files yield an empty list.
+    Returns (metric_names, sample_col, resolved_config_path).
+    Raises if the config is missing, unreadable, lacks ``sample_col``, or if
+    ``sample_col`` is not one of {'filename', 'case_id'}.
     """
     resolved_cfg = config_path
     if resolved_cfg is None and csv_path:
         resolved_cfg = os.path.join(os.path.dirname(os.path.abspath(csv_path)), 'config.yaml')
 
     if not resolved_cfg or not os.path.isfile(resolved_cfg):
-        return [], resolved_cfg
+        raise FileNotFoundError(f"Required task config.yaml not found at: {resolved_cfg}")
 
     try:
         with open(resolved_cfg, 'r') as f:
             cfg = yaml.safe_load(f) or {}
-    except Exception:
-        logger.debug("Failed to read config.yaml at %s", resolved_cfg, exc_info=True)
-        return [], resolved_cfg
+    except Exception as exc:
+        raise RuntimeError(f"Failed to read task config at {resolved_cfg}: {exc}") from exc
+
+    sample_col = cfg.get('sample_col')
+    if not isinstance(sample_col, str):
+        raise ValueError(f"Task config at {resolved_cfg} must define 'sample_col' as 'filename' or 'case_id'.")
+    sample_col_norm = sample_col.strip().lower()
+    if sample_col_norm not in ('filename', 'case_id'):
+        raise ValueError(f"Invalid sample_col='{sample_col}' in {resolved_cfg}; expected 'filename' or 'case_id'.")
 
     raw_metrics = cfg.get('metrics', [])
     if isinstance(raw_metrics, (list, tuple, set)):
@@ -64,7 +71,7 @@ def load_config_metrics(csv_path: str, config_path: Optional[str] = None) -> Tup
         # Keep canonical alias names only
         canonical = _METRIC_ALIASES.get(name, name)
         metric_names.append(canonical)
-    return metric_names, resolved_cfg
+    return metric_names, sample_col_norm, resolved_cfg
 
 
 def compute_additional_metrics(metric_names: Sequence[str], labels: np.ndarray, preds: np.ndarray) -> Dict[str, float]:

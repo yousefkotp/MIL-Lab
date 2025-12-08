@@ -117,13 +117,15 @@ class MILCSVDataset(Dataset):
         features_dir: str = '',
         allowed_exts: Tuple[str, ...] = ('.h5', '.hdf5'),
         dataframe: Optional[pd.DataFrame] = None,
+        sample_col: str = 'case_id',
         case_fusion: str = 'late',
     ):
         """
         Dataset that loads patch-level features and supports multiple slides per case.
 
-        If a ``case_id`` column is present (or ``slide_ids`` lists are provided), rows are
-        grouped by case. ``case_fusion`` controls how slides are combined:
+        ``sample_col`` controls the sampling unit ('filename' or 'case_id'). If ``sample_col``
+        is 'case_id' (or ``slide_ids`` lists are provided), rows are grouped by case.
+        ``case_fusion`` controls how slides are combined:
           - 'late' (default): keep slides separate and average logits in the training loop.
           - 'early': concatenate patch embeddings from all slides into one bag.
         """
@@ -131,6 +133,10 @@ class MILCSVDataset(Dataset):
         if case_fusion not in ('late', 'early'):
             raise ValueError(f"case_fusion must be 'late' or 'early', got {case_fusion}")
         self.case_fusion = case_fusion
+        sample_col_norm = str(sample_col).strip().lower()
+        if sample_col_norm not in ('filename', 'case_id'):
+            raise ValueError(f"sample_col must be 'filename' or 'case_id', got {sample_col}")
+        self.sample_col = sample_col_norm
 
         if dataframe is not None:
             df = dataframe.copy()
@@ -139,12 +145,14 @@ class MILCSVDataset(Dataset):
             df = pd.read_csv(csv_path)
 
         # Validate presence of core columns (allow grouped data with slide_ids)
-        required_cols = ['label', 'split']
+        required_cols = ['label', 'split', self.sample_col]
         missing = [c for c in required_cols if c not in df.columns]
         if missing:
             raise ValueError(f"Missing required columns in CSV: {missing}. Expected at least: {required_cols}")
         if 'filename' not in df.columns and 'slide_ids' not in df.columns:
             raise ValueError("CSV must contain either 'filename' (per-slide) or 'slide_ids' (list per case).")
+        if self.sample_col == 'case_id' and df['case_id'].isnull().any():
+            raise ValueError("sample_col='case_id' selected but 'case_id' column contains missing values.")
 
         self.features_dir = os.path.abspath(os.path.expanduser(features_dir))
         self.allowed_exts = allowed_exts
@@ -161,26 +169,50 @@ class MILCSVDataset(Dataset):
             df['_y'] = df['label'].map(self._label_to_idx)
 
         self.raw_df = df.copy()
+        # Ensure each sample (per sample_col) maps to exactly one label
+        dup_mask = (
+            df.groupby(df[self.sample_col].astype(str))['_y']
+            .nunique(dropna=False)
+            .reset_index()
+        )
+        bad = dup_mask[dup_mask['_y'] > 1][self.sample_col].tolist()
+        if bad:
+            raise ValueError(f"Inconsistent labels for {self.sample_col} values: {bad[:5]} (and {max(0, len(bad)-5)} more)")
 
-        # Build per-sample (case) records
+        # Build per-sample records based on sample_col policy
         self.samples = []
         if 'slide_ids' in df.columns:
             for _, row in df.iterrows():
                 slide_ids = _as_list(row['slide_ids'])
                 if len(slide_ids) == 0:
                     continue
-                case_id = row['case_id'] if 'case_id' in row else None
-                sample_id = str(case_id) if case_id is not None and not (isinstance(case_id, float) and np.isnan(case_id)) else slide_ids[0]
                 split = row['split'] if 'split' in row else 'train'
-                self.samples.append({
-                    'id': str(sample_id),
-                    'case_id': str(case_id) if case_id is not None else None,
-                    'slide_ids': slide_ids,
-                    'label': row['label'],
-                    'label_idx': int(row['_y']),
-                    'split': split,
-                })
-        elif 'case_id' in df.columns:
+                if self.sample_col == 'case_id':
+                    case_id = row['case_id'] if 'case_id' in row else None
+                    sample_id = case_id
+                    if sample_id is None or (isinstance(sample_id, float) and np.isnan(sample_id)):
+                        sample_id = slide_ids[0]
+                    self.samples.append({
+                        'id': str(sample_id),
+                        'case_id': str(case_id) if case_id is not None else None,
+                        'slide_ids': slide_ids,
+                        'label': row['label'],
+                        'label_idx': int(row['_y']),
+                        'split': split,
+                    })
+                else:  # sample_col == 'filename'
+                    case_id_val = row['case_id'] if 'case_id' in row else None
+                    for slide_id in slide_ids:
+                        sid = str(slide_id)
+                        self.samples.append({
+                            'id': sid,
+                            'case_id': str(case_id_val) if case_id_val is not None and not (isinstance(case_id_val, float) and np.isnan(case_id_val)) else None,
+                            'slide_ids': [sid],
+                            'label': row['label'],
+                            'label_idx': int(row['_y']),
+                            'split': split,
+                        })
+        elif self.sample_col == 'case_id':
             grouped = df.groupby(df['case_id'].astype(str), sort=False)
             for case_id, grp in grouped:
                 slide_ids = grp['filename'].astype(str).tolist()
@@ -209,9 +241,10 @@ class MILCSVDataset(Dataset):
                 if not slide_id:
                     continue
                 split = row['split'] if 'split' in row else 'train'
+                case_id_val = row['case_id'] if 'case_id' in row else None
                 self.samples.append({
                     'id': slide_id,
-                    'case_id': None,
+                    'case_id': str(case_id_val) if case_id_val is not None and not (isinstance(case_id_val, float) and np.isnan(case_id_val)) else None,
                     'slide_ids': [slide_id],
                     'label': row['label'],
                     'label_idx': int(row['_y']),
@@ -280,8 +313,9 @@ class MILCSVDataset(Dataset):
         self.missing_rows: int = total_slides - matched_slides
         self.missing_slide_ids: List[str] = missing_ids
 
+        grouping_desc = 'case_id' if self.sample_col == 'case_id' else 'filename'
         logger.info(
-            f"[MILCSVDataset] Using {len(self.samples)} samples (grouped by {'case' if 'case_id' in df.columns else 'slide'}) "
+            f"[MILCSVDataset] Using {len(self.samples)} samples (sample_col={grouping_desc}) "
             f"with case_fusion={self.case_fusion}. Matched {self.valid_rows}/{self.total_rows} slides; missing={self.missing_rows}."
         )
 

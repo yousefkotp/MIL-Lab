@@ -3,7 +3,10 @@ set -euo pipefail
 
 # Define tasks (format: .../<dataset>/<task>/task.csv)
 CSV_PATHS=(
+  /home/kotpaz/scratch/tasks/custom/bc_therapy/er_status/task.csv
   /home/kotpaz/scratch/tasks/custom/bc_therapy/grade/task.csv
+  /home/kotpaz/scratch/tasks/custom/bc_therapy/her2_status/task.csv
+  /home/kotpaz/scratch/tasks/custom/bc_therapy/residual_cancer_burden/task.csv
 )
 if [[ ${#CSV_PATHS[@]} -eq 0 ]]; then
   echo "CSV_PATHS must list at least one task CSV (format: .../<dataset>/<task>/task.csv)." >&2
@@ -17,7 +20,7 @@ for csvp in "${CSV_PATHS[@]}"; do
 done
 
 # Hyperparams (overridable)
-EPOCHS="${EPOCHS:-200}"
+EPOCHS="${EPOCHS:-100}"
 LR="${LR:-1e-3}"
 WEIGHT_DECAY="${WEIGHT_DECAY:-1e-2}"
 BATCH_SIZE="${BATCH_SIZE:-64}"
@@ -29,8 +32,7 @@ NUM_FOLDS="${NUM_FOLDS:-5}"
 # Feature directories to iterate (absolute paths)
 # Update these with the actual per-WSI vector features ('.h5'/'hdf5' with dataset 'features')
 FEATURE_DIRS=(
-  /home/mila/k/kotpy/scratch/datasets/CAMELYON17/trident/20x_512px_0px_overlap/slide_features_titan
-  /home/mila/k/kotpy/scratch/datasets/CAMELYON17/trident/20x_512px_0px_overlap/slide_features_feather
+  /home/kotpaz/projects/rrg-msh/kotpaz/datasets/iBOT_training/trained_models/grid_whole_slide_cls_mean
 )
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

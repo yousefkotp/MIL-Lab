@@ -13,14 +13,15 @@
 #   - CSV_PATH: single CSV containing columns filename,label[,case_id]
 #   - NUM_FOLDS: number of folds to create from CSV_PATH (default: 5)
 
-#SBATCH -J train_linear_camelyon
+#SBATCH -J train_linear
 #SBATCH --ntasks-per-node 1
 #SBATCH --cpus-per-task 6
-#SBATCH --gres=gpu:1
-#SBATCH --time=04:00:00
+#SBATCH --gres=gpu:nvidia_h100_80gb_hbm3_1g.10gb:1
+#SBATCH --time=12:00:00
 #SBATCH --mem=64G
-#SBATCH --output=/home/mila/k/kotpy/scratch/MIL-Lab/logs/output/%x_%j.txt
-#SBATCH --error=/home/mila/k/kotpy/scratch/MIL-Lab/logs/error/%x_%j.txt
+#SBATCH --output=/home/kotpaz/scratch/MIL-Lab/logs/output/%x_%j.txt
+#SBATCH --error=/home/kotpaz/scratch/MIL-Lab/logs/error/%x_%j.txt
+#SBATCH --account=def-msh-ab
 
 set -euo pipefail
 
@@ -55,6 +56,11 @@ DEFAULT_TASK="$(basename "${CSV_DIR}")"
 DEFAULT_DATASET="$(basename "$(dirname "${CSV_DIR}")")"
 DATASET="${DATASET:-${DEFAULT_DATASET}}"
 TASK="${TASK:-${DEFAULT_TASK}}"
+CONFIG_PATH="${CONFIG_PATH:-${CSV_DIR}/config.yaml}"
+if [[ ! -f "${CONFIG_PATH}" ]]; then
+  echo "Error: Required config.yaml not found at ${CONFIG_PATH}" >&2
+  exit 1
+fi
 
 # Normalize inputs
 FEATURES_SRC_DIR="${FEATURES_SRC_DIR%/}"
@@ -92,6 +98,7 @@ TMP_OUTPUT_DIR="${RUN_TMPDIR}/output"
 echo "Using SLURM_TMPDIR: ${SLURM_TMPDIR}"
 echo "Run scratch: ${RUN_TMPDIR}"
 echo "CSV path: ${CSV_PATH}"
+echo "Config path: ${CONFIG_PATH}"
 echo "Dataset: ${DATASET} | Task: ${TASK}"
 echo "Folds: ${NUM_FOLDS}"
 mkdir -p "${TMP_FEATURES_DIR}" "${TMP_OUTPUT_DIR}"
@@ -122,6 +129,7 @@ fi
 echo "Starting linear training (outputs under ${TMP_OUTPUT_DIR})"
 python train_linear.py \
   --csv_path "${CSV_PATH}" \
+  --config_path "${CONFIG_PATH}" \
   --num_folds "${NUM_FOLDS}" \
   --features_dir "${TMP_FEATURES_DIR}" \
   --epochs "${EPOCHS}" \

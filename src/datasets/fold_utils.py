@@ -31,6 +31,20 @@ def _apply_label_mapping(df: pd.DataFrame, label_to_idx: Dict, label_col: str = 
     return out
 
 
+def _assert_single_label_per_sample(df: pd.DataFrame, sample_col: str, label_col: str = '_y') -> None:
+    """Ensure each sample (per sample_col) has a unique label; else raise."""
+    if sample_col not in df.columns:
+        raise ValueError(f"sample_col '{sample_col}' not found in dataframe columns")
+    dup_mask = (
+        df.groupby(df[sample_col].astype(str))[label_col]
+        .nunique(dropna=False)
+        .reset_index()
+    )
+    bad = dup_mask[dup_mask[label_col] > 1][sample_col].tolist()
+    if bad:
+        raise ValueError(f"Inconsistent labels for {sample_col} values: {bad[:5]} (and {max(0, len(bad)-5)} more)")
+
+
 def _choose_splitter(num_folds: int, split_seed: int, groups: Optional[np.ndarray]):
     if groups is not None and StratifiedGroupKFold is not None:
         return StratifiedGroupKFold(n_splits=num_folds, shuffle=True, random_state=split_seed)
@@ -47,18 +61,29 @@ def make_internal_folds(
     num_folds: int,
     split_seed: int,
     *,
+    sample_col: str,
     label_col: str = 'label',
     filename_col: str = 'filename',
-    group_col: str = 'case_id',
 ) -> Tuple[List[pd.DataFrame], Dict]:
-    """Create stratified folds (optionally grouped by case_id) from a single CSV.
+    """Create stratified folds from a single CSV with configurable sampling unit.
 
     The input CSV is expected to have columns: filename,label[,case_id]. A new
     'split' column is created per fold (train/val), and a consistent `_y` label
     index is attached so that all folds share identical label mappings.
+    Grouping is controlled by ``sample_col`` ('case_id' -> StratifiedGroupKFold,
+    'filename' -> StratifiedKFold without grouping).
     """
     df = pd.read_csv(csv_path)
-    _validate_columns(df, [filename_col, label_col])
+    sample_col_norm = str(sample_col).strip().lower()
+    if sample_col_norm not in ('filename', 'case_id'):
+        raise ValueError(f"sample_col must be 'filename' or 'case_id'; got '{sample_col}'")
+
+    required_cols = [label_col]
+    if filename_col:
+        required_cols.append(filename_col)
+    if sample_col_norm == 'case_id':
+        required_cols.append('case_id')
+    _validate_columns(df, required_cols)
 
     if num_folds < 2:
         raise ValueError("num_folds must be at least 2 when generating folds")
@@ -70,9 +95,15 @@ def make_internal_folds(
 
     label_to_idx = _build_label_mapping([df], label_col=label_col)
     df = _apply_label_mapping(df, label_to_idx, label_col=label_col)
+    _assert_single_label_per_sample(df, sample_col=sample_col_norm, label_col='_y')
 
     y = df['_y'].to_numpy()
-    groups = df[group_col].astype(str).to_numpy() if group_col in df.columns else None
+    groups = None
+    if sample_col_norm == 'case_id':
+        if df['case_id'].isnull().any():
+            missing = sorted(df.loc[df['case_id'].isnull(), 'case_id'].unique())
+            raise ValueError(f"sample_col=case_id selected but case_id contains missing values: {missing}")
+        groups = df['case_id'].astype(str).to_numpy()
 
     if groups is not None and len(np.unique(groups)) < num_folds:
         raise ValueError(
@@ -104,11 +135,11 @@ def prepare_folds(
     csv_path: Optional[str] = None,
     num_folds: Optional[int] = None,
     split_seed: int = DEFAULT_SPLIT_SEED,
+    sample_col: str,
 ) -> Tuple[List[pd.DataFrame], Dict]:
     """Resolve fold dataframes from a single unsplit CSV (preferred path).
 
-    - Stratified by label; grouped by ``case_id`` when present so all slides from
-      a case share the same split.
+    - Stratified by label; grouping controlled by ``sample_col`` ('case_id' or 'filename').
     - Produces train/val splits only; each fold holds roughly 1/``num_folds`` of
       the data as validation.
     """
@@ -116,4 +147,4 @@ def prepare_folds(
         raise ValueError("csv_path is required when generating folds internally")
     if num_folds is None:
         raise ValueError("num_folds must be set when using --csv_path")
-    return make_internal_folds(csv_path, num_folds, split_seed)
+    return make_internal_folds(csv_path, num_folds, split_seed, sample_col=sample_col)
