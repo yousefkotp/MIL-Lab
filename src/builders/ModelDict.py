@@ -124,7 +124,8 @@ class ModelDict:
             task=parts[3]
         )
 
-        config.check_pretrained_flag(pretrained=pretrained)
+        effective_pretrained = pretrained and config.is_pretrained()
+        config.check_pretrained_flag(pretrained=effective_pretrained)
         return config
 
 

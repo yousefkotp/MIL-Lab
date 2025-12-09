@@ -255,23 +255,26 @@ def forward_with_case_fusion(model, feats, y, *, device, criterion):
     y = y.to(device, non_blocking=True)
     if isinstance(feats, list):
         slide_logits = []
+        slide_losses = []
         for slide_feats in feats:
             slide_feats = slide_feats.to(device, non_blocking=True)
-            out, _ = model(slide_feats, loss_fn=None, label=None)
+            out, _ = model(slide_feats, loss_fn=criterion, label=y)
             slide_logits.append(out['logits'])
+            slide_losses.append(out['loss'])
         logits_stack = torch.cat(slide_logits, dim=0)  # [S, C]
         if logits_stack.dim() == 1:
             logits_stack = logits_stack.unsqueeze(0)
         fused_logits = logits_stack.mean(dim=0, keepdim=True)  # [1, C]
-        loss = criterion(fused_logits, y) if criterion is not None else None
+        loss = torch.stack([
+            l if torch.is_tensor(l) else torch.tensor(l, device=device, dtype=torch.float32)
+            for l in slide_losses
+        ]).mean()
         return fused_logits, loss
 
     feats = feats.to(device, non_blocking=True)
     out, _ = model(feats, loss_fn=criterion, label=y)
     logits = out['logits']
-    loss = out['loss'] if out['loss'] is not None else None
-    if loss is None and criterion is not None:
-        loss = criterion(logits, y)
+    loss = out['loss']
     return logits, loss
 
 def run_single_fold(args, fold_df: pd.DataFrame, fold_idx: int):
@@ -374,8 +377,6 @@ def run_single_fold(args, fold_df: pd.DataFrame, fold_idx: int):
         num_steps = len(train_loader)
         for step_idx, (feats, y, _) in enumerate(train_loader, start=1):
             logits, raw_loss = forward_with_case_fusion(model, feats, y, device=device, criterion=criterion)
-            if raw_loss is None:
-                raw_loss = criterion(logits, y.to(device, non_blocking=True))
             running_loss += float(raw_loss.item())
 
             loss = raw_loss / float(accum_steps)

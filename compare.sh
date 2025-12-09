@@ -37,19 +37,19 @@ if [[ ${#ALL_RUNS[@]} -eq 0 ]]; then
 fi
 
 # Index by dataset/task/model -> list of feature dirs
-declare -A GROUPS
+declare -A RUN_GROUPS
 for run in "${ALL_RUNS[@]}"; do
   # Extract components
   run_rel="${run#${RESULTS_ROOT%/}/}"
   IFS='/' read -r feature dataset task model <<< "${run_rel}"
   key="${dataset}/${task}/${model}"
-  GROUPS["${key}"]+="${run} "
+  RUN_GROUPS["${key}"]+="${run} "
 done
 
 LOG_ROOT="compare"
 mkdir -p "${LOG_ROOT}"
 
-for key in "${!GROUPS[@]}"; do
+for key in "${!RUN_GROUPS[@]}"; do
   dataset="${key%%/*}"
   rest="${key#*/}"
   task="${rest%%/*}"
@@ -62,7 +62,7 @@ for key in "${!GROUPS[@]}"; do
   mkdir -p "${plots_dir}"
 
   # Collect paths and names
-  paths=(${GROUPS["${key}"]})
+  paths=(${RUN_GROUPS["${key}"]})
   names=()
   for p in "${paths[@]}"; do
     feature="$(basename "$(dirname "$(dirname "$(dirname "${p}")")")")"
