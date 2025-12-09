@@ -1,3 +1,4 @@
+import logging
 import os
 from typing import Dict, List, Optional, Tuple, Set
 
@@ -6,6 +7,7 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset
 
+logger = logging.getLogger(__name__)
 
 def _index_feature_files(root: str, exts: Tuple[str, ...], target_stems: Set[str], parent_dir_name: str) -> Dict[str, str]:
     """Index feature files under ``root`` only for the requested stems.
@@ -275,6 +277,12 @@ class LinearCSVDataset(Dataset):
         self.valid_rows: int = matched_slides
         self.missing_rows: int = total_slides - matched_slides
         self.missing_slide_ids: List[str] = missing_ids
+
+        grouping_desc = 'case_id' if self.sample_col == 'case_id' else 'filename'
+        logger.info(
+            f"[LinearCSVDataset] Using {len(self.samples)} samples (sample_col={grouping_desc}) "
+            f"with case_fusion={self.case_fusion}. Matched {self.valid_rows}/{self.total_rows} slides; missing={self.missing_rows}."
+        )
 
     @property
     def num_classes(self) -> int:

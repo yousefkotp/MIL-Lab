@@ -1,10 +1,12 @@
 import argparse
+import logging
 import os
 import json
 import random
 from datetime import datetime
 from typing import Optional, Tuple
 import time
+import sys
 
 os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
 
@@ -25,6 +27,16 @@ from src.datasets.fold_utils import DEFAULT_SPLIT_SEED, prepare_folds
 from src.datasets.mil_csv_dataset import MILCSVDataset
 from src.builder import create_model, save_model
 from src.metrics_utils import compute_additional_metrics, load_config_metrics
+
+
+def _configure_logging():
+    """Route INFO+ logs (including from datasets) to stdout for Slurm capture."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+        handlers=[logging.StreamHandler(sys.stdout)],
+        force=True,
+    )
 
 
 def _seed_worker(worker_id: int):
@@ -489,6 +501,8 @@ def run_single_fold(args, fold_df: pd.DataFrame, fold_idx: int):
 
 
 def main():
+    _configure_logging()
+
     args = parse_args()
     custom_metrics, sample_col, resolved_config_path = load_config_metrics(args.csv_path, config_path=args.config_path)
     args.custom_metrics = tuple(custom_metrics)

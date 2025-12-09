@@ -101,11 +101,6 @@ def _load_features_sorted(fp: str) -> torch.Tensor:
             raise ValueError(f"Length mismatch: features N={feats.shape[0]} vs coords N={coords.shape[0]}")
 
         idx, meta = _row_major_sort_indices(coords)
-        # Log minimal info for debugging without being verbose
-        logger.debug(
-            f"Sorted {os.path.basename(fp)} by row-major: mapping={meta.get('mapping')} "
-            f"HxW={meta.get('H')}x{meta.get('W')}"
-        )
         feats_sorted = feats[idx]
         return torch.from_numpy(feats_sorted).float()
 
