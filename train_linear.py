@@ -52,6 +52,13 @@ def _make_generator(seed: int) -> torch.Generator:
     return g
 
 
+def _default_hidden_dims(in_dim: int) -> Tuple[int, int]:
+    """Heuristic hidden sizes: h1 ≈ 0.66 * in_dim, h2 ≈ 0.5 * h1."""
+    h1 = max(4, int(round(in_dim * 0.66)))
+    h2 = max(2, int(round(h1 * 0.5)))
+    return h1, h2
+
+
 def parse_args():
     p = argparse.ArgumentParser(description="Train linear probe on per-WSI vector features (.h5 with 'features'=(D,))")
     p.add_argument('--csv_path', type=str, required=True, help='Single CSV with columns: filename,label[,case_id]; if case_id is present, all slides from a case are kept in the same fold')
@@ -67,6 +74,7 @@ def parse_args():
     p.add_argument('--weight_decay', type=float, default=1e-2)
     p.add_argument('--num_workers', type=int, default=4)
     p.add_argument('--batch_size', type=int, default=64)
+    p.add_argument('--dropout', type=float, default=0.25, help='Dropout applied in the MLP head (default: 0.25)')
     p.add_argument('--balanced_sampling', action='store_true', help='Enable class-balanced sampling for the training loader')
     p.add_argument('--normalize', action='store_true', help='Standardize features via training-set mean/std')
     p.add_argument('--case_fusion', type=str, default='late', choices=['late', 'early'],
@@ -92,6 +100,7 @@ def _collate(batch):
 
 
 def evaluate(model: nn.Module, loader: DataLoader, device, num_classes: int, label_names: Optional[list] = None, *, mean=None, std=None, extra_metrics: Optional[list] = None) -> Tuple[dict, np.ndarray, np.ndarray]:
+    prev_mode = model.training
     model.eval()
     all_logits = []
     all_labels = []
@@ -165,6 +174,9 @@ def evaluate(model: nn.Module, loader: DataLoader, device, num_classes: int, lab
             metrics.update(compute_additional_metrics(extra_metrics, labels, preds))
         except Exception:
             pass
+
+    if prev_mode:
+        model.train()
 
     return metrics, logits, labels
 
@@ -255,8 +267,23 @@ def run_single_fold(args, fold_df: pd.DataFrame, fold_idx: int):
         # fallback: infer by a single item
         sample_x, _, _ = train_ds[0]
         feat_dim = int(sample_x.shape[0])
-    model = nn.Linear(feat_dim, num_classes)
+    h1, h2 = _default_hidden_dims(feat_dim)
+    model = nn.Sequential(
+        nn.LayerNorm(feat_dim),
+        nn.Linear(feat_dim, h1),
+        nn.GELU(),
+        nn.Dropout(args.dropout),
+        nn.Linear(h1, h2),
+        nn.GELU(),
+        nn.Dropout(args.dropout),
+        nn.Linear(h2, num_classes),
+    )
+    print(f"[Fold {fold_idx}] Linear head dims: in={feat_dim}, h1={h1}, h2={h2}, out={num_classes}, dropout={args.dropout}")
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    # Keep normalization stats on the same device as the features/model to avoid CPU/GPU mismatches
+    if mean is not None and std is not None:
+        mean = mean.to(device)
+        std = std.to(device)
     model.to(device)
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)

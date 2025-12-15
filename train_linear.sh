@@ -22,6 +22,7 @@
 #SBATCH --output=logs/output/%x_%j.txt
 #SBATCH --error=logs/error/%x_%j.txt
 #SBATCH --account=def-msh-ab
+#SBATCH --exclude=fc11016
 
 set -euo pipefail
 
@@ -90,6 +91,7 @@ LR="${LR:-1e-3}"
 WEIGHT_DECAY="${WEIGHT_DECAY:-1e-2}"
 BATCH_SIZE="${BATCH_SIZE:-64}"
 NUM_WORKERS="${NUM_WORKERS:-${SLURM_CPUS_PER_TASK:-6}}"
+DROPOUT="${DROPOUT:-0.25}"
 
 # Flags
 BALANCED_SAMPLING="${BALANCED_SAMPLING:-0}"
@@ -189,6 +191,7 @@ python train_linear.py \
   --weight_decay "${WEIGHT_DECAY}" \
   --batch_size "${BATCH_SIZE}" \
   --num_workers "${NUM_WORKERS}" \
+  --dropout "${DROPOUT}" \
   --output_dir "${TMP_OUTPUT_DIR}" \
   "${EXTRA_FLAGS[@]}"
 

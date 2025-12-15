@@ -36,51 +36,60 @@ if [[ ${#ALL_RUNS[@]} -eq 0 ]]; then
   exit 0
 fi
 
-# Index by dataset/task/model -> list of feature dirs
-declare -A RUN_GROUPS
+# Index runs
+declare -A LINEAR_BY_TASK           # dataset/task -> linear path (first seen)
+declare -A FEATURE_ROOTS            # dataset/task -> space-separated feature roots
 for run in "${ALL_RUNS[@]}"; do
-  # Extract components
   run_rel="${run#${RESULTS_ROOT%/}/}"
   IFS='/' read -r feature dataset task model <<< "${run_rel}"
-  key="${dataset}/${task}/${model}"
-  RUN_GROUPS["${key}"]+="${run} "
+  # Track feature roots per task
+  ft_key="${dataset}/${task}"
+  # only record once per feature root
+  case " ${FEATURE_ROOTS[${ft_key}]:-} " in
+    *" ${feature} "* ) ;;
+    * ) FEATURE_ROOTS["${ft_key}"]+="${feature} ";;
+  esac
+  # Track linear path per task (use first encountered)
+  if [[ "${model}" == "linear" && -z "${LINEAR_BY_TASK[${ft_key}]:-}" ]]; then
+    LINEAR_BY_TASK["${ft_key}"]="${run}"
+  fi
 done
 
 LOG_ROOT="compare"
 mkdir -p "${LOG_ROOT}"
 
-for key in "${!RUN_GROUPS[@]}"; do
-  dataset="${key%%/*}"
-  rest="${key#*/}"
-  task="${rest%%/*}"
-  model="${rest#*/}"
-
-  # Prepare outputs
-  out_dir="${LOG_ROOT}/${dataset}/${task}"
-  plots_dir="${out_dir}/${model}"
-  latex_file="${out_dir}/${model}.tex"
-  mkdir -p "${plots_dir}"
-
-  # Collect paths and names
-  paths=(${RUN_GROUPS["${key}"]})
-  names=()
-  for p in "${paths[@]}"; do
-    feature="$(basename "$(dirname "$(dirname "$(dirname "${p}")")")")"
-    names+=("${feature}")
+# ---------------------------------------------------------------------------
+# Also create per-task aggregate tables: all methods x all features together.
+# ---------------------------------------------------------------------------
+for ft_key in "${!FEATURE_ROOTS[@]}"; do
+  dataset="${ft_key%%/*}"
+  task="${ft_key#*/}"
+  # Build roots array from feature roots, adding linear task root if present and not already included
+  features=(${FEATURE_ROOTS["${ft_key}"]})
+  roots=()
+  for feat in "${features[@]}"; do
+    roots+=("${RESULTS_ROOT%/}/${feat}/${dataset}/${task}")
   done
-
-  echo "== Dataset: ${dataset} | Task: ${task} | Model: ${model} (features: ${#paths[@]}) =="
+  if [[ -n "${LINEAR_BY_TASK["${ft_key}"]:-}" ]]; then
+    lin_root="$(dirname "${LINEAR_BY_TASK["${ft_key}"]}")"
+    if [[ " ${roots[*]} " != *" ${lin_root} "* ]]; then
+      roots+=("${lin_root}")
+      features+=("windows")
+    fi
+  fi
+  out_dir="${LOG_ROOT}/${dataset}/${task}"
+  mkdir -p "${out_dir}"
+  latex_file="${out_dir}/all_methods.tex"
+  plots_dir="${out_dir}/all_methods"
+  mkdir -p "${plots_dir}"
+  echo "== Aggregate table: ${dataset} | ${task} (features: ${#roots[@]}) =="
   python "${COMPARE_SCRIPT}" \
-    "${paths[@]}" \
-    --names "${names[@]}" \
+    "${roots[@]}" \
+    --names "${features[@]}" \
     --format latex \
     --latex-file "${latex_file}" \
-    --only-intersection \
+    --latex-compile \
     --latex-include-std \
     --latex-include-embeddings \
-    --latex-keep-aux \
-    --save-plots \
-    --plots-dir "${plots_dir}"
+    --latex-keep-aux
 done
-
-echo "Comparison tables written under ${LOG_ROOT}"
