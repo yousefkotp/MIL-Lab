@@ -3,16 +3,7 @@ set -euo pipefail
 
 # Define tasks (format: .../<dataset>/<task>/task.csv)
 CSV_PATHS=(
-  /home/kotpaz/scratch/tasks/custom/bracs/coarse/task.csv
-  /home/kotpaz/scratch/tasks/custom/bracs/fine/task.csv
-  /home/kotpaz/scratch/tasks/custom/camelyon17/breast_cancer_metastases/task.csv
-  /home/kotpaz/scratch/tasks/custom/dhmc_kidney/morphological_subtyping/task.csv
-  /home/kotpaz/scratch/tasks/custom/dhmc_luad/histologic_pattern/task.csv
-  /home/kotpaz/scratch/tasks/custom/ebrains/diagnosis/task.csv
-  /home/kotpaz/scratch/tasks/custom/ebrains/diagnosis_group/task.csv
-  /home/kotpaz/scratch/tasks/custom/ebrains/idh_status/task.csv
-  /home/kotpaz/scratch/tasks/custom/imp/grade/task.csv
-  /home/kotpaz/scratch/tasks/custom/panda/prostate_cancer_grade/task.csv
+  /home/kotpaz/scratch/tasks/custom/imp_cervix/dysplasia_grading/task.csv
 )
 
 # CSV_PATHS=(
@@ -68,6 +59,7 @@ CSV_PATHS=(
 #   /home/kotpaz/scratch/tasks/custom/imp/grade/task.csv
 #   /home/kotpaz/scratch/tasks/custom/mbc/treatment_response/task.csv
 #   /home/kotpaz/scratch/tasks/custom/panda/prostate_cancer_grade/task.csv
+#   /home/kotpaz/scratch/tasks/custom/imp_cervix/dysplasia_grading/task.csv
 # )
 if [[ ${#CSV_PATHS[@]} -eq 0 ]]; then
   echo "CSV_PATHS must list at least one task CSV (format: .../<dataset>/<task>/task.csv)." >&2
@@ -86,7 +78,10 @@ NUM_FOLDS="${NUM_FOLDS:-5}"
 # Models to run
 MODELS=(
   abmil.base.slide_hubert_base.none
+  clam.base_subtyping.slide_hubert_base.none
+  dsmil.base.slide_hubert_base.none
   meanmil.base.slide_hubert_base.none
+  transmil.base.slide_hubert_base.none
 )
 # MODELS=(
 #   abmil.base.slide_hubert_base.none
@@ -111,10 +106,10 @@ MODELS=(
 
 # Feature directories to iterate (absolute paths)
 FEATURE_DIRS=(
-  /home/kotpaz/projects/rrg-msh/kotpaz/datasets
+  /home/kotpaz/projects/rrg-msh/kotpaz/datasets/backbone_embeddings
 )
-FEATURES_PARENT_DIR="patches_6x6"
-FEAT_BASE_NAME="patches_6x6"  # Hardcoded name for output directory
+FEATURES_PARENT_DIR="features_lunit-vits8"
+FEAT_BASE_NAME="backbone_embeddings"  # Hardcoded name for output directory
 
 # /home/kotpaz/projects/rrg-msh/kotpaz/datasets/iBOT_training/trained_models/0x_cls_mean_11000_16x16_step_16x16
 

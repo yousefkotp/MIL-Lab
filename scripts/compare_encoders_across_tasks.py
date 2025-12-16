@@ -269,6 +269,12 @@ def plot_encoder_comparison(
         for encoder in encoder_avgs.keys()
     ))
 
+    # Calculate wins for each encoder
+    wins_count = defaultdict(int)
+    for winner in task_winners.values():
+        wins_count[winner] += 1
+    total_tasks = len(task_winners)
+
     # Prepare data for plotting
     n_tasks = len(sorted_tasks)
     n_encoders = len(all_encoders)
@@ -295,7 +301,10 @@ def plot_encoder_comparison(
                 values.append(0)  # Missing data
 
         offset = (i - n_encoders/2 + 0.5) * bar_width
-        bars = ax.bar(x + offset, values, bar_width, label=encoder,
+        # Add win count to label
+        wins = wins_count.get(encoder, 0)
+        label = f"{encoder} ({wins}/{total_tasks})"
+        bars = ax.bar(x + offset, values, bar_width, label=label,
                      color=encoder_colors[encoder], alpha=0.8, edgecolor='black', linewidth=0.5)
 
         # Add star markers for winners
@@ -310,16 +319,65 @@ def plot_encoder_comparison(
 
     mode_text = 'higher is better' if mode == 'max' else 'lower is better'
     title = f'Encoder Comparison Across Tasks\n{metric} ({mode_text})'
-    if methods_used:
-        title += f"\nMethods averaged: {', '.join(sorted(methods_used))}"
-    else:
-        title += "\nMethods averaged: all available"
+    # if methods_used:
+    #     title += f"\nMethods averaged: {', '.join(sorted(methods_used))}"
+    # else:
+    #     title += "\nMethods averaged: all available"
     ax.set_title(title, fontsize=14, fontweight='bold', pad=20)
 
-    # Set x-axis labels
+    # Set x-axis labels with color coding by dataset
     task_labels = [f"{dataset}/{task}" for dataset, task in sorted_tasks]
     ax.set_xticks(x)
     ax.set_xticklabels(task_labels, rotation=90, ha='right', fontsize=9)
+
+    # Color-code x-axis labels by dataset
+    unique_datasets = sorted(set(dataset for dataset, _ in sorted_tasks))
+    n_datasets = len(unique_datasets)
+
+    # Use a colormap that can handle many datasets without repeating
+    if n_datasets <= 10:
+        cmap = plt.cm.tab10
+    elif n_datasets <= 20:
+        cmap = plt.cm.tab20
+    else:
+        cmap = plt.cm.gist_rainbow
+
+    # Spread out color indices to maximize contrast between consecutive datasets in sorted order
+    # Find the order datasets appear in sorted_tasks
+    dataset_order = []
+    seen = set()
+    for dataset, _ in sorted_tasks:
+        if dataset not in seen:
+            dataset_order.append(dataset)
+            seen.add(dataset)
+
+    # Assign colors in a spread-out pattern (e.g., 0, n/2, n/4, 3n/4, ...)
+    color_indices = []
+    step = max(1, n_datasets // 2)
+    idx = 0
+    for _ in range(n_datasets):
+        while idx in color_indices:
+            idx = (idx + 1) % n_datasets
+        color_indices.append(idx)
+        idx = (idx + step) % n_datasets
+
+    dataset_color_dict = {}
+    for i, dataset in enumerate(dataset_order):
+        color_idx = color_indices[i]
+        dataset_color_dict[dataset] = cmap(color_idx / max(1, n_datasets - 1))
+
+    # Apply colors to tick labels
+    for i, (dataset, task) in enumerate(sorted_tasks):
+        ax.get_xticklabels()[i].set_color(dataset_color_dict[dataset])
+        ax.get_xticklabels()[i].set_fontweight('bold')
+
+    # Add vertical separators between different datasets
+    prev_dataset = None
+    for i, (dataset, task) in enumerate(sorted_tasks):
+        if prev_dataset is not None and dataset != prev_dataset:
+            # Add a vertical line between datasets
+            ax.axvline(x=i - 0.5, color='gray', linestyle='--', linewidth=1.5, alpha=0.5, zorder=0)
+        prev_dataset = dataset
 
     # Add grid for readability
     ax.grid(axis='y', alpha=0.3, linestyle='--', linewidth=0.5)
@@ -329,8 +387,9 @@ def plot_encoder_comparison(
     ax.legend(loc='upper left', bbox_to_anchor=(1.0, 1.0), fontsize=10,
              title='Encoders', title_fontsize=11, framealpha=0.9)
 
-    # Add note about stars
-    fig.text(0.99, 0.01, '★ = Winner for this task',
+    # Add note about stars and color coding
+    notes = '★ = Winner for this task\nX-axis labels colored by dataset'
+    fig.text(0.99, 0.01, notes,
             ha='right', va='bottom', fontsize=9, style='italic')
 
     # Adjust layout to prevent label cutoff

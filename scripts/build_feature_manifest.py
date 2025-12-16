@@ -6,13 +6,21 @@ import pandas as pd
 from src.metrics_utils import load_config_metrics
 from src.datasets.mil_csv_dataset import MILCSVDataset
 from src.datasets.linear_csv_dataset import LinearCSVDataset
-
+from src.datasets.knn_csv_dataset import KNNCSVDataset
+from src.datasets.logreg_csv_dataset import LogRegCSVDataset
 
 def build_manifest(csv_path: str, config_path: str, features_dir: str, parent_dir: str, mode: str) -> list[str]:
     """Return list of lines '<abs_path>\\t<rel_path>' for matching feature files."""
-    if mode not in ("mil", "linear"):
-        raise ValueError(f"mode must be 'mil' or 'linear', got {mode}")
-    ds_cls = MILCSVDataset if mode == "mil" else LinearCSVDataset
+    if mode not in ("mil", "linear", "knn"):
+        raise ValueError(f"mode must be 'mil', 'linear', or 'knn', got {mode}")
+    if mode == "mil":
+        ds_cls = MILCSVDataset
+    elif mode == "knn":
+        ds_cls = KNNCSVDataset
+    elif mode == "linear":
+        ds_cls = LinearCSVDataset
+    else:
+        ds_cls = LogRegCSVDataset
 
     metrics, sample_col, _ = load_config_metrics(csv_path=csv_path, config_path=config_path)
     _ = metrics  # unused; kept for future extensions
@@ -44,7 +52,7 @@ def parse_args():
     ap.add_argument("--config_path", required=True)
     ap.add_argument("--features_dir", required=True)
     ap.add_argument("--parent_dir", required=True, help="Name of the parent directory containing .h5 files")
-    ap.add_argument("--mode", choices=["mil", "linear"], required=True)
+    ap.add_argument("--mode", choices=["mil", "linear", "knn", "logreg"], required=True)
     return ap.parse_args()
 
 

@@ -57,18 +57,6 @@ CSV_PATHS=(
   /home/kotpaz/scratch/tasks/custom/panda/prostate_cancer_grade/task.csv
   /home/kotpaz/scratch/tasks/custom/imp_cervix/dysplasia_grading/task.csv
 )
-# CSV_PATHS=(
-#   /home/kotpaz/scratch/tasks/custom/bracs/coarse/task.csv
-#   /home/kotpaz/scratch/tasks/custom/bracs/fine/task.csv
-#   /home/kotpaz/scratch/tasks/custom/camelyon17/breast_cancer_metastases/task.csv
-#   /home/kotpaz/scratch/tasks/custom/dhmc_kidney/morphological_subtyping/task.csv
-#   /home/kotpaz/scratch/tasks/custom/dhmc_luad/histologic_pattern/task.csv
-#   /home/kotpaz/scratch/tasks/custom/ebrains/diagnosis/task.csv
-#   /home/kotpaz/scratch/tasks/custom/ebrains/diagnosis_group/task.csv
-#   /home/kotpaz/scratch/tasks/custom/ebrains/idh_status/task.csv
-#   /home/kotpaz/scratch/tasks/custom/imp/grade/task.csv
-#   /home/kotpaz/scratch/tasks/custom/panda/prostate_cancer_grade/task.csv
-# )
 if [[ ${#CSV_PATHS[@]} -eq 0 ]]; then
   echo "CSV_PATHS must list at least one task CSV (format: .../<dataset>/<task>/task.csv)." >&2
   exit 1
@@ -80,35 +68,29 @@ for csvp in "${CSV_PATHS[@]}"; do
   fi
 done
 
-# Hyperparams (overridable)
-EPOCHS="${EPOCHS:-200}"
-LR="${LR:-1e-3}"
-WEIGHT_DECAY="${WEIGHT_DECAY:-1e-2}"
-BATCH_SIZE="${BATCH_SIZE:-64}"
-NUM_WORKERS="${NUM_WORKERS:-6}"
-BALANCED_SAMPLING="${BALANCED_SAMPLING:-1}"
-NORMALIZE="${NORMALIZE:-0}"
 NUM_FOLDS="${NUM_FOLDS:-5}"
-DROPOUT="${DROPOUT:-0.25}"
+NUM_WORKERS="${NUM_WORKERS:-6}"
+STANDARDIZE="${STANDARDIZE:-0}"
+CLASS_WEIGHT_BALANCED="${CLASS_WEIGHT_BALANCED:-1}"
+CASE_FUSION="${CASE_FUSION:-late}"
 
 # Feature directories to iterate (absolute paths)
-# Update these with the actual per-WSI vector features ('.h5'/'hdf5' with dataset 'features')
 FEATURE_DIRS=(
   /home/kotpaz/projects/rrg-msh/kotpaz/datasets
 )
 FEATURES_PARENT_DIR="global_windows_no_dropping"
-FEAT_BASE_NAME="slide_as_window_no_dropping"
+FEAT_BASE_NAME="slide_as_window_no_dropping_log_reg"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${SCRIPT_DIR%/scripts}"
-LAUNCH_SCRIPT="${REPO_ROOT}/train_linear.sh"
+LAUNCH_SCRIPT="${REPO_ROOT}/train_logreg.sh"
 
 if [[ ! -f "${LAUNCH_SCRIPT}" ]]; then
-  echo "train_linear.sh not found at ${LAUNCH_SCRIPT}" >&2
+  echo "train_logreg.sh not found at ${LAUNCH_SCRIPT}" >&2
   exit 1
 fi
 
-echo "Submitting linear jobs for ${#FEATURE_DIRS[@]} feature sets over ${#CSV_PATHS[@]} tasks..."
+echo "Submitting logistic regression jobs for ${#FEATURE_DIRS[@]} feature sets over ${#CSV_PATHS[@]} tasks..."
 
 for csv_path in "${CSV_PATHS[@]}"; do
   csv_dir="$(dirname "${csv_path}")"
@@ -122,12 +104,12 @@ for csv_path in "${CSV_PATHS[@]}"; do
       echo "Warning: features dir not found: ${fdir_noslash}" >&2
     fi
 
-    job_name="train_linear_${feat_base}_${dataset_name}_${task_name}"
-    out_dir="results/${feat_base}/${dataset_name}/${task_name}/linear"
+    job_name="train_logreg_${feat_base}_${dataset_name}_${task_name}"
+    out_dir="results/${feat_base}/${dataset_name}/${task_name}/logreg"
 
     echo "sbatch --job-name ${job_name} (features=${feat_base}, dataset=${dataset_name}, task=${task_name})"
     sbatch --job-name "${job_name}" \
-      --export=ALL,REPO_ROOT="${REPO_ROOT}",FEATURES_SRC_DIR="${fdir_noslash}",FEATURES_PARENT_DIR="${FEATURES_PARENT_DIR}",DATASET="${dataset_name}",TASK="${task_name}",OUTPUT_DIR="${out_dir}",EPOCHS="${EPOCHS}",LR="${LR}",WEIGHT_DECAY="${WEIGHT_DECAY}",BATCH_SIZE="${BATCH_SIZE}",NUM_WORKERS="${NUM_WORKERS}",BALANCED_SAMPLING="${BALANCED_SAMPLING}",NORMALIZE="${NORMALIZE}",CSV_PATH="${csv_path}",NUM_FOLDS="${NUM_FOLDS}",DROPOUT="${DROPOUT}" \
+      --export=ALL,REPO_ROOT="${REPO_ROOT}",FEATURES_SRC_DIR="${fdir_noslash}",FEATURES_PARENT_DIR="${FEATURES_PARENT_DIR}",DATASET="${dataset_name}",TASK="${task_name}",OUTPUT_DIR="${out_dir}",NUM_FOLDS="${NUM_FOLDS}",NUM_WORKERS="${NUM_WORKERS}",STANDARDIZE="${STANDARDIZE}",CLASS_WEIGHT_BALANCED="${CLASS_WEIGHT_BALANCED}",CASE_FUSION="${CASE_FUSION}",CSV_PATH="${csv_path}" \
       "${LAUNCH_SCRIPT}"
   done
 done

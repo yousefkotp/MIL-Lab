@@ -1,22 +1,26 @@
 #!/bin/bash
-# Linear probe Slurm job (mirrors train_mil.sh structure)
+# Logistic regression linear probe (LBFGS) with L2 sweep selected by validation loss.
 #
 # Environment overrides (exported by submitter or set inline before sbatch):
 #   - REPO_ROOT: repo root path (defaults to SLURM_SUBMIT_DIR or PWD)
 #   - FEATURES_SRC_DIR: absolute path to per-WSI vector features (.h5/.hdf5 with dataset 'features')
+#   - FEATURES_PARENT_DIR: name of the parent directory containing .h5 files (e.g., features_lunit-vits8)
 #   - DATASET: dataset name (derived from CSV_PATH if unset)
 #   - TASK: task name (derived from CSV_PATH if unset)
-#   - OUTPUT_DIR: override final output directory (default: results/<features_base>/<dataset>/<task>/linear)
-#   - EPOCHS, LR, WEIGHT_DECAY, BATCH_SIZE, NUM_WORKERS: training hyperparameters
-#   - BALANCED_SAMPLING: if set to 1/true, pass --balanced_sampling
-#   - NORMALIZE: if set to 1/true, pass --normalize
+#   - OUTPUT_DIR: override final output directory (default: results/<features_base>/<dataset>/<task>/logreg)
 #   - CSV_PATH: single CSV containing columns filename,label[,case_id]
 #   - NUM_FOLDS: number of folds to create from CSV_PATH (default: 5)
+#   - STANDARDIZE: if set to 1/true, apply per-sample L2 normalization (default: 1)
+#   - CLASS_WEIGHT_BALANCED: if set to 1/true, use class_weight='balanced' (default: 1)
+#   - CASE_FUSION: late or early fusion when multiple slides belong to the same patient (default: late)
+#
+# L2 grid and solver settings follow the paper spec:
+#   - 45 log-spaced L2 values between 1e-6 and 1e5
+#   - solver=lbfgs, penalty=l2, max_iter=500
 
-#SBATCH -J train_linear
+#SBATCH -J train_logreg
 #SBATCH --ntasks-per-node 1
 #SBATCH --cpus-per-task 6
-#SBATCH --gres=gpu:nvidia_h100_80gb_hbm3_1g.10gb:1
 #SBATCH --time=05:30:00
 #SBATCH --mem=64G
 #SBATCH --output=logs/output/%x_%j.txt
@@ -31,13 +35,12 @@ REPO_ROOT_DIR="${REPO_ROOT:-${SLURM_SUBMIT_DIR:-${PWD}}}"
 cd "${REPO_ROOT_DIR}"
 export PYTHONPATH="${REPO_ROOT_DIR}:${PYTHONPATH:-}"
 
-# Ensure deterministic CuBLAS choice when PyTorch enables deterministic algorithms
-# See: https://docs.nvidia.com/cuda/cublas/index.html#results-reproducibility
+# Determinism alignment with PyTorch defaults (though training is scikit-learn)
 export CUBLAS_WORKSPACE_CONFIG="${CUBLAS_WORKSPACE_CONFIG:-:4096:8}"
 
-FEATURES_SRC_DIR="${FEATURES_SRC_DIR:-}"   # should be absolute path
+FEATURES_SRC_DIR="${FEATURES_SRC_DIR:-}"
 FEATURES_PARENT_DIR="${FEATURES_PARENT_DIR:-}"
-CSV_PATH="${CSV_PATH:-}"  # required: single CSV with filename,label[,case_id]
+CSV_PATH="${CSV_PATH:-}"
 NUM_FOLDS="${NUM_FOLDS:-5}"
 
 if [[ -z "${FEATURES_SRC_DIR}" ]]; then
@@ -61,7 +64,6 @@ if [[ -z "${FEATURES_PARENT_DIR}" ]]; then
   exit 1
 fi
 
-# Derive dataset/task from CSV path if not provided
 CSV_DIR="$(dirname "${CSV_PATH}")"
 DEFAULT_TASK="$(basename "${CSV_DIR}")"
 DEFAULT_DATASET="$(basename "$(dirname "${CSV_DIR}")")"
@@ -73,29 +75,20 @@ if [[ ! -f "${CONFIG_PATH}" ]]; then
   exit 1
 fi
 
-# Normalize inputs
 FEATURES_SRC_DIR="${FEATURES_SRC_DIR%/}"
 FEATURES_BASENAME="$(basename "${FEATURES_SRC_DIR}")"
 
-# Default outputs under repo, unless OUTPUT_DIR is provided (absolute allowed)
-OUTPUT_DIR="${OUTPUT_DIR:-results/${FEATURES_BASENAME}/${DATASET}/${TASK}/linear}"
+OUTPUT_DIR="${OUTPUT_DIR:-results/${FEATURES_BASENAME}/${DATASET}/${TASK}/logreg}"
 if [[ "${OUTPUT_DIR}" = /* ]]; then
   FINAL_OUTPUT_DIR="${OUTPUT_DIR}"
 else
   FINAL_OUTPUT_DIR="${PWD%/}/${OUTPUT_DIR}"
 fi
 
-# Training hyperparams
-EPOCHS="${EPOCHS:-200}"
-LR="${LR:-1e-3}"
-WEIGHT_DECAY="${WEIGHT_DECAY:-1e-2}"
-BATCH_SIZE="${BATCH_SIZE:-64}"
 NUM_WORKERS="${NUM_WORKERS:-${SLURM_CPUS_PER_TASK:-6}}"
-DROPOUT="${DROPOUT:-0.25}"
-
-# Flags
-BALANCED_SAMPLING="${BALANCED_SAMPLING:-0}"
-NORMALIZE="${NORMALIZE:-1}"
+STANDARDIZE="${STANDARDIZE:-1}"
+CLASS_WEIGHT_BALANCED="${CLASS_WEIGHT_BALANCED:-1}"
+CASE_FUSION="${CASE_FUSION:-late}"
 
 ################ ENFORCE SLURM TMPDIR ################
 if [[ -z "${SLURM_TMPDIR:-}" ]]; then
@@ -103,7 +96,7 @@ if [[ -z "${SLURM_TMPDIR:-}" ]]; then
   exit 2
 fi
 
-RUN_TMPDIR="${SLURM_TMPDIR%/}/linear_${SLURM_JOB_ID:-$$}"
+RUN_TMPDIR="${SLURM_TMPDIR%/}/logreg_${SLURM_JOB_ID:-$$}"
 TMP_FEATURES_DIR="${RUN_TMPDIR}/features"
 TMP_OUTPUT_DIR="${RUN_TMPDIR}/output"
 
@@ -135,7 +128,7 @@ python scripts/build_feature_manifest.py \
   --config_path "${CONFIG_PATH}" \
   --features_dir "${FEATURES_SRC_DIR}" \
   --parent_dir "${FEATURES_PARENT_DIR}" \
-  --mode linear \
+  --mode logreg \
   > "${FEATURE_MANIFEST}" 2> "${FEATURE_MANIFEST_ERR}"
 MANIFEST_STATUS=$?
 set -e
@@ -170,29 +163,28 @@ for line in "${FEATURE_LINES[@]}"; do
 done
 echo "Feature subset copy complete: ${COPIED} files staged."
 
-# Build flags
 EXTRA_FLAGS=()
-if [[ "${BALANCED_SAMPLING}" == "1" || "${BALANCED_SAMPLING,,}" == "true" ]]; then
-  EXTRA_FLAGS+=("--balanced_sampling")
-fi
-if [[ "${NORMALIZE}" == "1" || "${NORMALIZE,,}" == "true" ]]; then
+if [[ "${STANDARDIZE}" == "1" || "${STANDARDIZE,,}" == "true" ]]; then
   EXTRA_FLAGS+=("--normalize")
+else
+  EXTRA_FLAGS+=("--no-normalize")
+fi
+if [[ "${CLASS_WEIGHT_BALANCED}" == "1" || "${CLASS_WEIGHT_BALANCED,,}" == "true" ]]; then
+  EXTRA_FLAGS+=("--class_weight_balanced")
+fi
+if [[ -n "${CASE_FUSION}" ]]; then
+  EXTRA_FLAGS+=("--case_fusion" "${CASE_FUSION}")
 fi
 
-echo "Starting linear training (outputs under ${TMP_OUTPUT_DIR})"
-python train_linear.py \
+echo "Starting logistic regression linear probe (outputs under ${TMP_OUTPUT_DIR})"
+python train_logreg.py \
   --csv_path "${CSV_PATH}" \
   --config_path "${CONFIG_PATH}" \
   --num_folds "${NUM_FOLDS}" \
   --features_dir "${TMP_FEATURES_DIR}" \
   --feature_parent_dir "${FEATURES_PARENT_DIR}" \
-  --epochs "${EPOCHS}" \
-  --lr "${LR}" \
-  --weight_decay "${WEIGHT_DECAY}" \
-  --batch_size "${BATCH_SIZE}" \
-  --num_workers "${NUM_WORKERS}" \
-  --dropout "${DROPOUT}" \
   --output_dir "${TMP_OUTPUT_DIR}" \
+  --num_workers "${NUM_WORKERS}" \
   "${EXTRA_FLAGS[@]}"
 
-# Note: Stage-back handled by EXIT trap
+# Stage-back handled by EXIT trap

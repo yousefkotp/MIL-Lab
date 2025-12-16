@@ -1,22 +1,26 @@
 #!/bin/bash
-# Linear probe Slurm job (mirrors train_mil.sh structure)
+# k-NN Slurm job (mirrors train_linear.sh structure; CPU-bound, GPU not required)
 #
 # Environment overrides (exported by submitter or set inline before sbatch):
 #   - REPO_ROOT: repo root path (defaults to SLURM_SUBMIT_DIR or PWD)
 #   - FEATURES_SRC_DIR: absolute path to per-WSI vector features (.h5/.hdf5 with dataset 'features')
+#   - FEATURES_PARENT_DIR: name of the parent directory containing .h5 files (e.g., features_lunit-vits8)
 #   - DATASET: dataset name (derived from CSV_PATH if unset)
 #   - TASK: task name (derived from CSV_PATH if unset)
-#   - OUTPUT_DIR: override final output directory (default: results/<features_base>/<dataset>/<task>/linear)
-#   - EPOCHS, LR, WEIGHT_DECAY, BATCH_SIZE, NUM_WORKERS: training hyperparameters
-#   - BALANCED_SAMPLING: if set to 1/true, pass --balanced_sampling
-#   - NORMALIZE: if set to 1/true, pass --normalize
+#   - OUTPUT_DIR: override final output directory (default: results/<features_base>/<dataset>/<task>/knn)
 #   - CSV_PATH: single CSV containing columns filename,label[,case_id]
 #   - NUM_FOLDS: number of folds to create from CSV_PATH (default: 5)
+#   - NORMALIZE: if set to 1/true, apply per-sample L2 normalization before k-NN
+#   - CASE_FUSION: late or early fusion when multiple slides belong to the same patient (default: late)
+#   - MAX_K: upper bound for auto-generated k grid (default: 101)
+#   - KNN_WEIGHTS: scikit-learn weights argument (default: distance)
+#   - KNN_METRIC: scikit-learn metric argument (default: minkowski)
+#   - KNN_P: Minkowski power parameter (default: 2)
+#   - KNN_ALGO: Neighbor search algorithm (default: brute)
 
-#SBATCH -J train_linear
+#SBATCH -J train_knn
 #SBATCH --ntasks-per-node 1
 #SBATCH --cpus-per-task 6
-#SBATCH --gres=gpu:nvidia_h100_80gb_hbm3_1g.10gb:1
 #SBATCH --time=05:30:00
 #SBATCH --mem=64G
 #SBATCH --output=logs/output/%x_%j.txt
@@ -32,12 +36,11 @@ cd "${REPO_ROOT_DIR}"
 export PYTHONPATH="${REPO_ROOT_DIR}:${PYTHONPATH:-}"
 
 # Ensure deterministic CuBLAS choice when PyTorch enables deterministic algorithms
-# See: https://docs.nvidia.com/cuda/cublas/index.html#results-reproducibility
 export CUBLAS_WORKSPACE_CONFIG="${CUBLAS_WORKSPACE_CONFIG:-:4096:8}"
 
-FEATURES_SRC_DIR="${FEATURES_SRC_DIR:-}"   # should be absolute path
+FEATURES_SRC_DIR="${FEATURES_SRC_DIR:-}"
 FEATURES_PARENT_DIR="${FEATURES_PARENT_DIR:-}"
-CSV_PATH="${CSV_PATH:-}"  # required: single CSV with filename,label[,case_id]
+CSV_PATH="${CSV_PATH:-}"
 NUM_FOLDS="${NUM_FOLDS:-5}"
 
 if [[ -z "${FEATURES_SRC_DIR}" ]]; then
@@ -61,7 +64,6 @@ if [[ -z "${FEATURES_PARENT_DIR}" ]]; then
   exit 1
 fi
 
-# Derive dataset/task from CSV path if not provided
 CSV_DIR="$(dirname "${CSV_PATH}")"
 DEFAULT_TASK="$(basename "${CSV_DIR}")"
 DEFAULT_DATASET="$(basename "$(dirname "${CSV_DIR}")")"
@@ -73,29 +75,24 @@ if [[ ! -f "${CONFIG_PATH}" ]]; then
   exit 1
 fi
 
-# Normalize inputs
 FEATURES_SRC_DIR="${FEATURES_SRC_DIR%/}"
 FEATURES_BASENAME="$(basename "${FEATURES_SRC_DIR}")"
 
-# Default outputs under repo, unless OUTPUT_DIR is provided (absolute allowed)
-OUTPUT_DIR="${OUTPUT_DIR:-results/${FEATURES_BASENAME}/${DATASET}/${TASK}/linear}"
+OUTPUT_DIR="${OUTPUT_DIR:-results/${FEATURES_BASENAME}/${DATASET}/${TASK}/knn}"
 if [[ "${OUTPUT_DIR}" = /* ]]; then
   FINAL_OUTPUT_DIR="${OUTPUT_DIR}"
 else
   FINAL_OUTPUT_DIR="${PWD%/}/${OUTPUT_DIR}"
 fi
 
-# Training hyperparams
-EPOCHS="${EPOCHS:-200}"
-LR="${LR:-1e-3}"
-WEIGHT_DECAY="${WEIGHT_DECAY:-1e-2}"
-BATCH_SIZE="${BATCH_SIZE:-64}"
 NUM_WORKERS="${NUM_WORKERS:-${SLURM_CPUS_PER_TASK:-6}}"
-DROPOUT="${DROPOUT:-0.25}"
-
-# Flags
-BALANCED_SAMPLING="${BALANCED_SAMPLING:-0}"
 NORMALIZE="${NORMALIZE:-1}"
+CASE_FUSION="${CASE_FUSION:-late}"
+MAX_K="${MAX_K:-101}"
+KNN_WEIGHTS="${KNN_WEIGHTS:-distance}"
+KNN_METRIC="${KNN_METRIC:-minkowski}"
+KNN_P="${KNN_P:-2}"
+KNN_ALGO="${KNN_ALGO:-brute}"
 
 ################ ENFORCE SLURM TMPDIR ################
 if [[ -z "${SLURM_TMPDIR:-}" ]]; then
@@ -103,7 +100,7 @@ if [[ -z "${SLURM_TMPDIR:-}" ]]; then
   exit 2
 fi
 
-RUN_TMPDIR="${SLURM_TMPDIR%/}/linear_${SLURM_JOB_ID:-$$}"
+RUN_TMPDIR="${SLURM_TMPDIR%/}/knn_${SLURM_JOB_ID:-$$}"
 TMP_FEATURES_DIR="${RUN_TMPDIR}/features"
 TMP_OUTPUT_DIR="${RUN_TMPDIR}/output"
 
@@ -135,7 +132,7 @@ python scripts/build_feature_manifest.py \
   --config_path "${CONFIG_PATH}" \
   --features_dir "${FEATURES_SRC_DIR}" \
   --parent_dir "${FEATURES_PARENT_DIR}" \
-  --mode linear \
+  --mode knn \
   > "${FEATURE_MANIFEST}" 2> "${FEATURE_MANIFEST_ERR}"
 MANIFEST_STATUS=$?
 set -e
@@ -170,29 +167,28 @@ for line in "${FEATURE_LINES[@]}"; do
 done
 echo "Feature subset copy complete: ${COPIED} files staged."
 
-# Build flags
 EXTRA_FLAGS=()
-if [[ "${BALANCED_SAMPLING}" == "1" || "${BALANCED_SAMPLING,,}" == "true" ]]; then
-  EXTRA_FLAGS+=("--balanced_sampling")
-fi
 if [[ "${NORMALIZE}" == "1" || "${NORMALIZE,,}" == "true" ]]; then
   EXTRA_FLAGS+=("--normalize")
 fi
+if [[ -n "${CASE_FUSION}" ]]; then
+  EXTRA_FLAGS+=("--case_fusion" "${CASE_FUSION}")
+fi
 
-echo "Starting linear training (outputs under ${TMP_OUTPUT_DIR})"
-python train_linear.py \
+echo "Starting k-NN training (outputs under ${TMP_OUTPUT_DIR})"
+python train_knn.py \
   --csv_path "${CSV_PATH}" \
   --config_path "${CONFIG_PATH}" \
   --num_folds "${NUM_FOLDS}" \
   --features_dir "${TMP_FEATURES_DIR}" \
   --feature_parent_dir "${FEATURES_PARENT_DIR}" \
-  --epochs "${EPOCHS}" \
-  --lr "${LR}" \
-  --weight_decay "${WEIGHT_DECAY}" \
-  --batch_size "${BATCH_SIZE}" \
-  --num_workers "${NUM_WORKERS}" \
-  --dropout "${DROPOUT}" \
   --output_dir "${TMP_OUTPUT_DIR}" \
+  --num_workers "${NUM_WORKERS}" \
+  --weights "${KNN_WEIGHTS}" \
+  --metric "${KNN_METRIC}" \
+  --p "${KNN_P}" \
+  --algorithm "${KNN_ALGO}" \
+  --max_k "${MAX_K}" \
   "${EXTRA_FLAGS[@]}"
 
-# Note: Stage-back handled by EXIT trap
+# Stage-back handled by EXIT trap

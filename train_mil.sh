@@ -3,7 +3,7 @@
 #SBATCH --ntasks-per-node 1
 #SBATCH --cpus-per-task 6
 #SBATCH --gres=gpu:nvidia_h100_80gb_hbm3_2g.20gb:1
-#SBATCH --time=24:00:00
+#SBATCH --time=48:00:00
 #SBATCH --output=logs/output/%x_%j.txt
 #SBATCH --error=logs/error/%x_%j.txt
 #SBATCH --mem=64G
