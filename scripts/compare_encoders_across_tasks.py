@@ -263,11 +263,11 @@ def plot_encoder_comparison(
     sorted_tasks = sorted(task_encoder_avgs.keys())
 
     # Get all unique encoders across all tasks
-    all_encoders = sorted(set(
+    all_encoders_unsorted = set(
         encoder
         for encoder_avgs in task_encoder_avgs.values()
         for encoder in encoder_avgs.keys()
-    ))
+    )
 
     # Calculate wins for each encoder
     wins_count = defaultdict(int)
@@ -275,20 +275,35 @@ def plot_encoder_comparison(
         wins_count[winner] += 1
     total_tasks = len(task_winners)
 
+    # Sort encoders by number of wins (descending), then alphabetically
+    all_encoders = sorted(all_encoders_unsorted,
+                         key=lambda x: (-wins_count.get(x, 0), x))
+
     # Prepare data for plotting
     n_tasks = len(sorted_tasks)
     n_encoders = len(all_encoders)
+
+    # Dynamically adjust figure width based on number of tasks
+    # Allocate more width per task for better visibility
+    width_per_task = 0.8  # inches per task (reduced for smaller file size)
+    dynamic_width = max(figsize[0], n_tasks * width_per_task)
+    dynamic_figsize = (dynamic_width, figsize[1])
+
+    print(f"Creating plot with {n_tasks} tasks and {n_encoders} encoders")
+    print(f"Figure size: {dynamic_figsize[0]:.1f} x {dynamic_figsize[1]:.1f} inches at {dpi} DPI")
+    print(f"Output resolution: {int(dynamic_figsize[0] * dpi)} x {int(dynamic_figsize[1] * dpi)} pixels")
 
     # Create color map for encoders
     colors = plt.cm.Set2(np.linspace(0, 1, n_encoders))
     encoder_colors = {encoder: colors[i] for i, encoder in enumerate(all_encoders)}
 
     # Set up the plot
-    fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+    fig, ax = plt.subplots(figsize=dynamic_figsize, dpi=dpi)
 
     # Set bar width and positions
-    bar_width = 0.8 / n_encoders
-    x = np.arange(n_tasks)
+    # Make bars much wider for better visibility
+    bar_width = 1.6 / n_encoders  # Wide bars
+    x = np.arange(n_tasks) * 2.2  # Spacing to accommodate bars
 
     # Plot bars for each encoder
     for i, encoder in enumerate(all_encoders):
@@ -305,17 +320,17 @@ def plot_encoder_comparison(
         wins = wins_count.get(encoder, 0)
         label = f"{encoder} ({wins}/{total_tasks})"
         bars = ax.bar(x + offset, values, bar_width, label=label,
-                     color=encoder_colors[encoder], alpha=0.8, edgecolor='black', linewidth=0.5)
+                     color=encoder_colors[encoder], alpha=0.8, edgecolor='black', linewidth=1.5)
 
         # Add star markers for winners
         for j, task in enumerate(sorted_tasks):
             if task_winners.get(task) == encoder and values[j] > 0:
-                ax.plot(x[j] + offset, values[j], marker='*', markersize=15,
-                       color='gold', markeredgecolor='black', markeredgewidth=0.5, zorder=10)
+                ax.plot(x[j] + offset, values[j], marker='*', markersize=18,
+                       color='gold', markeredgecolor='black', markeredgewidth=1.0, zorder=10)
 
     # Customize plot
-    ax.set_xlabel('Task', fontsize=12, fontweight='bold')
-    ax.set_ylabel(f'{metric}', fontsize=12, fontweight='bold')
+    ax.set_xlabel('Task', fontsize=24, fontweight='bold')
+    ax.set_ylabel(f'{metric}', fontsize=24, fontweight='bold')
 
     mode_text = 'higher is better' if mode == 'max' else 'lower is better'
     title = f'Encoder Comparison Across Tasks\n{metric} ({mode_text})'
@@ -323,12 +338,15 @@ def plot_encoder_comparison(
     #     title += f"\nMethods averaged: {', '.join(sorted(methods_used))}"
     # else:
     #     title += "\nMethods averaged: all available"
-    ax.set_title(title, fontsize=14, fontweight='bold', pad=20)
+    ax.set_title(title, fontsize=28, fontweight='bold', pad=20)
 
     # Set x-axis labels with color coding by dataset
     task_labels = [f"{dataset}/{task}" for dataset, task in sorted_tasks]
     ax.set_xticks(x)
-    ax.set_xticklabels(task_labels, rotation=90, ha='right', fontsize=9)
+    ax.set_xticklabels(task_labels, rotation=90, ha='right', fontsize=16, fontweight='bold')
+
+    # Increase y-axis tick label size
+    ax.tick_params(axis='y', labelsize=16)
 
     # Color-code x-axis labels by dataset
     unique_datasets = sorted(set(dataset for dataset, _ in sorted_tasks))
@@ -376,21 +394,21 @@ def plot_encoder_comparison(
     for i, (dataset, task) in enumerate(sorted_tasks):
         if prev_dataset is not None and dataset != prev_dataset:
             # Add a vertical line between datasets
-            ax.axvline(x=i - 0.5, color='gray', linestyle='--', linewidth=1.5, alpha=0.5, zorder=0)
+            ax.axvline(x=x[i] - 1.1, color='gray', linestyle='--', linewidth=2.5, alpha=0.5, zorder=0)
         prev_dataset = dataset
 
     # Add grid for readability
-    ax.grid(axis='y', alpha=0.3, linestyle='--', linewidth=0.5)
+    ax.grid(axis='y', alpha=0.3, linestyle='--', linewidth=1.0)
     ax.set_axisbelow(True)
 
     # Add legend
-    ax.legend(loc='upper left', bbox_to_anchor=(1.0, 1.0), fontsize=10,
-             title='Encoders', title_fontsize=11, framealpha=0.9)
+    ax.legend(loc='upper left', bbox_to_anchor=(1.0, 1.0), fontsize=18,
+             title='Encoders', title_fontsize=20, framealpha=0.9)
 
     # Add note about stars and color coding
     notes = '★ = Winner for this task\nX-axis labels colored by dataset'
     fig.text(0.99, 0.01, notes,
-            ha='right', va='bottom', fontsize=9, style='italic')
+            ha='right', va='bottom', fontsize=16, style='italic', fontweight='bold')
 
     # Adjust layout to prevent label cutoff
     plt.tight_layout()
@@ -398,10 +416,20 @@ def plot_encoder_comparison(
     # Save plot
     output_path_obj = Path(output_path)
     output_path_obj.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(output_path, dpi=dpi, bbox_inches='tight')
-    plt.close()
 
-    print(f"\nPlot saved to: {output_path}")
+    # Determine format from file extension
+    file_ext = output_path_obj.suffix.lower()
+
+    # For vector formats (PDF, SVG), don't specify DPI in savefig (already set in figure)
+    # For raster formats (PNG, JPG), use the DPI parameter
+    if file_ext in ['.pdf', '.svg']:
+        plt.savefig(output_path, bbox_inches='tight', format=file_ext[1:])
+        print(f"\nPlot saved to: {output_path} (vector format - infinitely zoomable, smaller file size)")
+    else:
+        plt.savefig(output_path, dpi=dpi, bbox_inches='tight')
+        print(f"\nPlot saved to: {output_path}")
+
+    plt.close()
 
 
 def print_results(
@@ -536,20 +564,20 @@ def main():
     parser.add_argument(
         '--plot',
         type=str,
-        default="compare.png",
-        help='Save bar plot to specified file path (e.g., encoder_comparison.png)'
+        default="compare.pdf",
+        help='Save bar plot to specified file path. Use .pdf or .svg for vector format (smaller, zoomable), or .png for raster format (default: compare.pdf)'
     )
     parser.add_argument(
         '--plot-width',
         type=int,
-        default=20,
-        help='Plot width in inches (default: 20)'
+        default=40,
+        help='Plot width in inches (default: 40)'
     )
     parser.add_argument(
         '--plot-height',
         type=int,
-        default=8,
-        help='Plot height in inches (default: 8)'
+        default=12,
+        help='Plot height in inches (default: 12)'
     )
     parser.add_argument(
         '--plot-dpi',
