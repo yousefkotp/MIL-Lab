@@ -59,6 +59,13 @@ def _default_hidden_dims(in_dim: int) -> Tuple[int, int]:
     return h1, h2
 
 
+def _infer_dataset_task(csv_path: str) -> Tuple[str, str]:
+    csv_dir = os.path.dirname(os.path.abspath(csv_path))
+    task_name = os.path.basename(csv_dir)
+    dataset_name = os.path.basename(os.path.dirname(csv_dir))
+    return dataset_name, task_name
+
+
 def parse_args():
     p = argparse.ArgumentParser(description="Train linear probe on per-WSI vector features (.h5 with 'features'=(D,))")
     p.add_argument('--csv_path', type=str, required=True, help='Single CSV with columns: filename,label[,case_id]; if case_id is present, all slides from a case are kept in the same fold')
@@ -68,6 +75,22 @@ def parse_args():
     p.add_argument('--features_dir', type=str, required=True, help='Root directory containing per-slide feature files')
     p.add_argument('--feature_parent_dir', type=str, required=True, help="Name of the parent directory that contains the .h5 feature files when searching recursively (e.g., 'features_lunit-vits8')")
     p.add_argument('--seed', type=int, default=42)
+    p.add_argument(
+        '--embedding_level',
+        type=str,
+        default='slide',
+        choices=['slide', 'case'],
+        help="Feature granularity: 'slide' (default) uses per-slide embeddings; 'case' uses one embedding per case.",
+    )
+    p.add_argument(
+        '--feature_id_scope',
+        type=str,
+        default='none',
+        choices=['none', 'dataset', 'task'],
+        help="Namespace for feature file stems when using case embeddings or prefixed slide embeddings.",
+    )
+    p.add_argument('--dataset_name', type=str, default=None, help='Optional dataset name override for feature_id_scope.')
+    p.add_argument('--task_name', type=str, default=None, help='Optional task name override for feature_id_scope.')
 
     p.add_argument('--epochs', type=int, default=200)
     p.add_argument('--lr', type=float, default=1e-3)
@@ -194,14 +217,36 @@ def run_single_fold(args, fold_df: pd.DataFrame, fold_idx: int):
     fold_t0 = time.time()
     extra_metrics = list(getattr(args, 'custom_metrics', []) or [])
 
-    base_ds = LinearCSVDataset(csv_path=None, features_dir=args.features_dir, dataframe=fold_df, case_fusion=args.case_fusion, sample_col=args.sample_col, feature_parent_dir=args.feature_parent_dir)
+    base_ds = LinearCSVDataset(
+        csv_path=args.csv_path,
+        features_dir=args.features_dir,
+        dataframe=fold_df,
+        case_fusion=args.case_fusion,
+        sample_col=args.sample_col,
+        feature_parent_dir=args.feature_parent_dir,
+        embedding_level=args.embedding_level,
+        feature_id_scope=args.feature_id_scope,
+        dataset_name=args.dataset_name,
+        task_name=args.task_name,
+    )
     df = base_ds.df.copy()
     df_train, df_val, df_test = split_df(df)
 
     def make_loader(sub_df, shuffle: bool, balanced: bool = False, *, seed: Optional[int] = None):
         if sub_df is None or len(sub_df) == 0:
             return None, None
-        ds = LinearCSVDataset(csv_path=None, features_dir=args.features_dir, dataframe=sub_df, case_fusion=args.case_fusion, sample_col=args.sample_col, feature_parent_dir=args.feature_parent_dir)
+        ds = LinearCSVDataset(
+            csv_path=args.csv_path,
+            features_dir=args.features_dir,
+            dataframe=sub_df,
+            case_fusion=args.case_fusion,
+            sample_col=args.sample_col,
+            feature_parent_dir=args.feature_parent_dir,
+            embedding_level=args.embedding_level,
+            feature_id_scope=args.feature_id_scope,
+            dataset_name=args.dataset_name,
+            task_name=args.task_name,
+        )
         labels = ds.df['_y'].to_numpy()
         loader_seed = seed if seed is not None else args.seed
         loader_generator = _make_generator(loader_seed)
@@ -409,6 +454,16 @@ def main():
     if custom_metrics:
         print(f"Detected custom metrics from config ({resolved_config_path}): {custom_metrics}")
     print(f"Using sample_col='{sample_col}' from config at {resolved_config_path}")
+
+    inferred_dataset, inferred_task = _infer_dataset_task(args.csv_path)
+    if not args.dataset_name:
+        args.dataset_name = inferred_dataset
+    if not args.task_name:
+        args.task_name = inferred_task
+    if args.feature_id_scope in ("dataset", "task") and not args.dataset_name:
+        raise ValueError("feature_id_scope requires dataset_name; pass --dataset_name explicitly.")
+    if args.feature_id_scope == "task" and not args.task_name:
+        raise ValueError("feature_id_scope=task requires task_name; pass --task_name explicitly.")
 
     os.environ["PYTHONHASHSEED"] = str(args.seed)
     torch.manual_seed(args.seed)

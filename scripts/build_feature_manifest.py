@@ -9,7 +9,23 @@ from src.datasets.linear_csv_dataset import LinearCSVDataset
 from src.datasets.knn_csv_dataset import KNNCSVDataset
 from src.datasets.logreg_csv_dataset import LogRegCSVDataset
 
-def build_manifest(csv_path: str, config_path: str, features_dir: str, parent_dir: str, mode: str) -> list[str]:
+
+def _infer_dataset_task(csv_path: str) -> tuple[str, str]:
+    csv_dir = os.path.dirname(os.path.abspath(csv_path))
+    task_name = os.path.basename(csv_dir)
+    dataset_name = os.path.basename(os.path.dirname(csv_dir))
+    return dataset_name, task_name
+
+def build_manifest(
+    csv_path: str,
+    config_path: str,
+    features_dir: str,
+    parent_dir: str,
+    mode: str,
+    *,
+    embedding_level: str,
+    feature_id_scope: str,
+) -> list[str]:
     """Return list of lines '<abs_path>\\t<rel_path>' for matching feature files."""
     if mode not in ("mil", "linear", "knn", "logreg"):
         raise ValueError(f"mode must be 'mil', 'linear', 'knn', or 'logreg' got {mode}")
@@ -30,7 +46,22 @@ def build_manifest(csv_path: str, config_path: str, features_dir: str, parent_di
         df = df.copy()
         df["split"] = "train"
 
-    ds = ds_cls(csv_path=None, dataframe=df, features_dir=features_dir, sample_col=sample_col, feature_parent_dir=parent_dir)
+    dataset_name, task_name = _infer_dataset_task(csv_path)
+    ds_kwargs = dict(
+        csv_path=csv_path,
+        dataframe=df,
+        features_dir=features_dir,
+        sample_col=sample_col,
+        feature_parent_dir=parent_dir,
+    )
+    if mode != "mil":
+        ds_kwargs.update(
+            embedding_level=embedding_level,
+            feature_id_scope=feature_id_scope,
+            dataset_name=dataset_name,
+            task_name=task_name,
+        )
+    ds = ds_cls(**ds_kwargs)
     paths = sorted({os.path.abspath(p) for s in ds.samples for p in s.get("paths", [])})
     if not paths:
         raise RuntimeError("No matching feature files found for requested samples.")
@@ -53,6 +84,18 @@ def parse_args():
     ap.add_argument("--features_dir", required=True)
     ap.add_argument("--parent_dir", required=True, help="Name of the parent directory containing .h5 files")
     ap.add_argument("--mode", choices=["mil", "linear", "knn", "logreg"], required=True)
+    ap.add_argument(
+        "--embedding_level",
+        default="slide",
+        choices=["slide", "case"],
+        help="Feature granularity: 'slide' (default) or 'case'.",
+    )
+    ap.add_argument(
+        "--feature_id_scope",
+        default="none",
+        choices=["none", "dataset", "task"],
+        help="Namespace for feature file stems when using case embeddings or prefixed slide embeddings.",
+    )
     return ap.parse_args()
 
 
@@ -65,6 +108,8 @@ def main():
             features_dir=args.features_dir,
             parent_dir=args.parent_dir,
             mode=args.mode,
+            embedding_level=args.embedding_level,
+            feature_id_scope=args.feature_id_scope,
         )
     except Exception as exc:  # noqa: BLE001
         sys.stderr.write(f"{exc}\n")

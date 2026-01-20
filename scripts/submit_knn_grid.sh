@@ -92,6 +92,8 @@ KNN_WEIGHTS="${KNN_WEIGHTS:-distance}"
 KNN_METRIC="${KNN_METRIC:-minkowski}"
 KNN_P="${KNN_P:-2}"
 KNN_ALGO="${KNN_ALGO:-brute}"
+EMBEDDING_LEVEL="${EMBEDDING_LEVEL:-slide}" # case, slide
+FEATURE_ID_SCOPE="${FEATURE_ID_SCOPE:-none}" # none, task, dataset
 
 # Feature directories to iterate (absolute paths)
 FEATURE_DIRS=(
@@ -128,7 +130,7 @@ for csv_path in "${CSV_PATHS[@]}"; do
 
     echo "sbatch --job-name ${job_name} (features=${feat_base}, dataset=${dataset_name}, task=${task_name})"
     sbatch --job-name "${job_name}" \
-      --export=ALL,REPO_ROOT="${REPO_ROOT}",FEATURES_SRC_DIR="${fdir_noslash}",FEATURES_PARENT_DIR="${FEATURES_PARENT_DIR}",DATASET="${dataset_name}",TASK="${task_name}",OUTPUT_DIR="${out_dir}",NUM_FOLDS="${NUM_FOLDS}",NUM_WORKERS="${NUM_WORKERS}",NORMALIZE="${NORMALIZE}",CASE_FUSION="${CASE_FUSION}",MAX_K="${MAX_K}",KNN_WEIGHTS="${KNN_WEIGHTS}",KNN_METRIC="${KNN_METRIC}",KNN_P="${KNN_P}",KNN_ALGO="${KNN_ALGO}",CSV_PATH="${csv_path}" \
+      --export=ALL,REPO_ROOT="${REPO_ROOT}",FEATURES_SRC_DIR="${fdir_noslash}",FEATURES_PARENT_DIR="${FEATURES_PARENT_DIR}",DATASET="${dataset_name}",TASK="${task_name}",OUTPUT_DIR="${out_dir}",NUM_FOLDS="${NUM_FOLDS}",NUM_WORKERS="${NUM_WORKERS}",NORMALIZE="${NORMALIZE}",CASE_FUSION="${CASE_FUSION}",MAX_K="${MAX_K}",KNN_WEIGHTS="${KNN_WEIGHTS}",KNN_METRIC="${KNN_METRIC}",KNN_P="${KNN_P}",KNN_ALGO="${KNN_ALGO}",CSV_PATH="${csv_path}",EMBEDDING_LEVEL="${EMBEDDING_LEVEL}",FEATURE_ID_SCOPE="${FEATURE_ID_SCOPE}" \
       "${LAUNCH_SCRIPT}"
   done
 done

@@ -12,6 +12,8 @@
 #   - NUM_FOLDS: number of folds to create from CSV_PATH (default: 5)
 #   - NORMALIZE: if set to 1/true, apply per-sample L2 normalization before k-NN
 #   - CASE_FUSION: late or early fusion when multiple slides belong to the same patient (default: late)
+#   - EMBEDDING_LEVEL: slide (default) or case for case-level embeddings
+#   - FEATURE_ID_SCOPE: none (default), dataset, or task to namespace feature stems
 #   - MAX_K: upper bound for auto-generated k grid (default: 101)
 #   - KNN_WEIGHTS: scikit-learn weights argument (default: distance)
 #   - KNN_METRIC: scikit-learn metric argument (default: minkowski)
@@ -45,6 +47,8 @@ FEATURES_SRC_DIR="${FEATURES_SRC_DIR:-}"
 FEATURES_PARENT_DIR="${FEATURES_PARENT_DIR:-}"
 CSV_PATH="${CSV_PATH:-}"
 NUM_FOLDS="${NUM_FOLDS:-5}"
+EMBEDDING_LEVEL="${EMBEDDING_LEVEL:-slide}"
+FEATURE_ID_SCOPE="${FEATURE_ID_SCOPE:-none}"
 
 if [[ -z "${FEATURES_SRC_DIR}" ]]; then
   echo "ERROR: FEATURES_SRC_DIR is not set. Provide absolute path to vector features." >&2
@@ -136,6 +140,8 @@ python scripts/build_feature_manifest.py \
   --features_dir "${FEATURES_SRC_DIR}" \
   --parent_dir "${FEATURES_PARENT_DIR}" \
   --mode knn \
+  --embedding_level "${EMBEDDING_LEVEL}" \
+  --feature_id_scope "${FEATURE_ID_SCOPE}" \
   > "${FEATURE_MANIFEST}" 2> "${FEATURE_MANIFEST_ERR}"
 MANIFEST_STATUS=$?
 set -e
@@ -185,6 +191,8 @@ python train_knn.py \
   --num_folds "${NUM_FOLDS}" \
   --features_dir "${TMP_FEATURES_DIR}" \
   --feature_parent_dir "${FEATURES_PARENT_DIR}" \
+  --embedding_level "${EMBEDDING_LEVEL}" \
+  --feature_id_scope "${FEATURE_ID_SCOPE}" \
   --output_dir "${TMP_OUTPUT_DIR}" \
   --num_workers "${NUM_WORKERS}" \
   --weights "${KNN_WEIGHTS}" \

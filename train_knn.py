@@ -39,6 +39,13 @@ def _sanitize_key(s: str) -> str:
     return "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in s)
 
 
+def _infer_dataset_task(csv_path: str) -> Tuple[str, str]:
+    csv_dir = os.path.dirname(os.path.abspath(csv_path))
+    task_name = os.path.basename(csv_dir)
+    dataset_name = os.path.basename(os.path.dirname(csv_dir))
+    return dataset_name, task_name
+
+
 def parse_args():
     p = argparse.ArgumentParser(
         description="Train and select a k-NN classifier on per-WSI vector features using cross-validated folds."
@@ -79,6 +86,22 @@ def parse_args():
         required=True,
         help="Name of the parent directory that contains the .h5 feature files when searching recursively (e.g., 'features_lunit-vits8')",
     )
+    p.add_argument(
+        "--embedding_level",
+        type=str,
+        default="slide",
+        choices=["slide", "case"],
+        help="Feature granularity: 'slide' (default) uses per-slide embeddings; 'case' uses one embedding per case.",
+    )
+    p.add_argument(
+        "--feature_id_scope",
+        type=str,
+        default="none",
+        choices=["none", "dataset", "task"],
+        help="Namespace for feature file stems when using case embeddings or prefixed slide embeddings.",
+    )
+    p.add_argument("--dataset_name", type=str, default=None, help="Optional dataset name override for feature_id_scope.")
+    p.add_argument("--task_name", type=str, default=None, help="Optional task name override for feature_id_scope.")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument(
         "--normalize",
@@ -295,50 +318,66 @@ def run_single_fold(args, fold_df: pd.DataFrame, fold_idx: int):
     extra_metrics = list(getattr(args, "custom_metrics", []) or [])
 
     base_ds = KNNCSVDataset(
-        csv_path=None,
+        csv_path=args.csv_path,
         features_dir=args.features_dir,
         dataframe=fold_df,
         case_fusion=args.case_fusion,
         sample_col=args.sample_col,
         feature_parent_dir=args.feature_parent_dir,
         l2_normalize=args.normalize,
+        embedding_level=args.embedding_level,
+        feature_id_scope=args.feature_id_scope,
+        dataset_name=args.dataset_name,
+        task_name=args.task_name,
     )
     df = base_ds.df.copy()
     df_train, df_val, df_test = _split_df(df)
 
     train_ds = KNNCSVDataset(
-        csv_path=None,
+        csv_path=args.csv_path,
         features_dir=args.features_dir,
         dataframe=df_train,
         case_fusion=args.case_fusion,
         sample_col=args.sample_col,
         feature_parent_dir=args.feature_parent_dir,
         l2_normalize=args.normalize,
+        embedding_level=args.embedding_level,
+        feature_id_scope=args.feature_id_scope,
+        dataset_name=args.dataset_name,
+        task_name=args.task_name,
     )
     if len(train_ds) == 0:
         raise ValueError("Training split is empty after filtering; cannot proceed with training.")
     val_ds = (
         KNNCSVDataset(
-            csv_path=None,
+            csv_path=args.csv_path,
             features_dir=args.features_dir,
             dataframe=df_val,
             case_fusion=args.case_fusion,
             sample_col=args.sample_col,
             feature_parent_dir=args.feature_parent_dir,
             l2_normalize=args.normalize,
+            embedding_level=args.embedding_level,
+            feature_id_scope=args.feature_id_scope,
+            dataset_name=args.dataset_name,
+            task_name=args.task_name,
         )
         if df_val is not None and len(df_val) > 0
         else None
     )
     test_ds = (
         KNNCSVDataset(
-            csv_path=None,
+            csv_path=args.csv_path,
             features_dir=args.features_dir,
             dataframe=df_test,
             case_fusion=args.case_fusion,
             sample_col=args.sample_col,
             feature_parent_dir=args.feature_parent_dir,
             l2_normalize=args.normalize,
+            embedding_level=args.embedding_level,
+            feature_id_scope=args.feature_id_scope,
+            dataset_name=args.dataset_name,
+            task_name=args.task_name,
         )
         if df_test is not None and len(df_test) > 0
         else None
@@ -531,6 +570,16 @@ def main():
     if custom_metrics:
         print(f"Detected custom metrics from config ({resolved_config_path}): {custom_metrics}")
     print(f"Using sample_col='{sample_col}' from config at {resolved_config_path}")
+
+    inferred_dataset, inferred_task = _infer_dataset_task(args.csv_path)
+    if not args.dataset_name:
+        args.dataset_name = inferred_dataset
+    if not args.task_name:
+        args.task_name = inferred_task
+    if args.feature_id_scope in ("dataset", "task") and not args.dataset_name:
+        raise ValueError("feature_id_scope requires dataset_name; pass --dataset_name explicitly.")
+    if args.feature_id_scope == "task" and not args.task_name:
+        raise ValueError("feature_id_scope=task requires task_name; pass --task_name explicitly.")
 
     os.environ["PYTHONHASHSEED"] = str(args.seed)
     torch.manual_seed(args.seed)

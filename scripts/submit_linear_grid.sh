@@ -93,6 +93,8 @@ BALANCED_SAMPLING="${BALANCED_SAMPLING:-1}"
 NORMALIZE="${NORMALIZE:-0}"
 NUM_FOLDS="${NUM_FOLDS:-5}"
 DROPOUT="${DROPOUT:-0.25}"
+EMBEDDING_LEVEL="${EMBEDDING_LEVEL:-slide}" # case, slide
+FEATURE_ID_SCOPE="${FEATURE_ID_SCOPE:-none}" # none, task, dataset
 
 # Feature directories to iterate (absolute paths)
 # Update these with the actual per-WSI vector features ('.h5'/'hdf5' with dataset 'features')
@@ -130,7 +132,7 @@ for csv_path in "${CSV_PATHS[@]}"; do
 
     echo "sbatch --job-name ${job_name} (features=${feat_base}, dataset=${dataset_name}, task=${task_name})"
     sbatch --job-name "${job_name}" \
-      --export=ALL,REPO_ROOT="${REPO_ROOT}",FEATURES_SRC_DIR="${fdir_noslash}",FEATURES_PARENT_DIR="${FEATURES_PARENT_DIR}",DATASET="${dataset_name}",TASK="${task_name}",OUTPUT_DIR="${out_dir}",EPOCHS="${EPOCHS}",LR="${LR}",WEIGHT_DECAY="${WEIGHT_DECAY}",BATCH_SIZE="${BATCH_SIZE}",NUM_WORKERS="${NUM_WORKERS}",BALANCED_SAMPLING="${BALANCED_SAMPLING}",NORMALIZE="${NORMALIZE}",CSV_PATH="${csv_path}",NUM_FOLDS="${NUM_FOLDS}",DROPOUT="${DROPOUT}" \
+      --export=ALL,REPO_ROOT="${REPO_ROOT}",FEATURES_SRC_DIR="${fdir_noslash}",FEATURES_PARENT_DIR="${FEATURES_PARENT_DIR}",DATASET="${dataset_name}",TASK="${task_name}",OUTPUT_DIR="${out_dir}",EPOCHS="${EPOCHS}",LR="${LR}",WEIGHT_DECAY="${WEIGHT_DECAY}",BATCH_SIZE="${BATCH_SIZE}",NUM_WORKERS="${NUM_WORKERS}",BALANCED_SAMPLING="${BALANCED_SAMPLING}",NORMALIZE="${NORMALIZE}",CSV_PATH="${csv_path}",NUM_FOLDS="${NUM_FOLDS}",DROPOUT="${DROPOUT}",EMBEDDING_LEVEL="${EMBEDDING_LEVEL}",FEATURE_ID_SCOPE="${FEATURE_ID_SCOPE}" \
       "${LAUNCH_SCRIPT}"
   done
 done

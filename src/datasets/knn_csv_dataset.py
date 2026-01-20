@@ -25,6 +25,10 @@ class KNNCSVDataset(LinearCSVDataset):
                 feats = F.normalize(feats, p=2, dim=0, eps=1e-8)
             slide_feats.append(feats)
 
+        if self.embedding_level == "case" and len(slide_feats) != 1:
+            raise ValueError(
+                f"embedding_level='case' expects 1 feature per sample; got {len(slide_feats)} for id={sample['id']}"
+            )
         if len(slide_feats) == 1:
             fused = slide_feats[0]
         else:

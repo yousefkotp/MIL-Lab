@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 from typing import Dict, List, Optional, Tuple, Set
 
 import numpy as np
@@ -74,6 +75,58 @@ def _as_list(val) -> List[str]:
     return [str(val)]
 
 
+def _infer_dataset_task(csv_path: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+    if not csv_path:
+        return None, None
+    csv_dir = os.path.dirname(os.path.abspath(csv_path))
+    task_name = os.path.basename(csv_dir)
+    dataset_name = os.path.basename(os.path.dirname(csv_dir))
+    return dataset_name, task_name
+
+
+def _sanitize_feature_id(value: str) -> str:
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", value)
+    return safe.strip("_") or "sample"
+
+
+def _normalize_feature_id(raw_id: str, *, id_is_filename: bool) -> str:
+    raw = str(raw_id).strip()
+    if id_is_filename:
+        base = os.path.basename(raw)
+        return os.path.splitext(base)[0]
+    return raw
+
+
+def _compose_feature_id(
+    raw_id: str,
+    *,
+    sample_col: str,
+    scope: str,
+    dataset_name: Optional[str],
+    task_name: Optional[str],
+    include_sample_col: bool,
+    id_is_filename: bool,
+) -> str:
+    base_id = _normalize_feature_id(raw_id, id_is_filename=id_is_filename)
+    parts: List[str] = []
+    scope_norm = str(scope).strip().lower()
+    if scope_norm == "dataset":
+        if not dataset_name:
+            raise ValueError("feature_id_scope='dataset' requires dataset_name.")
+        parts.append(dataset_name)
+    elif scope_norm == "task":
+        if not dataset_name or not task_name:
+            raise ValueError("feature_id_scope='task' requires dataset_name and task_name.")
+        parts.extend([dataset_name, task_name])
+    elif scope_norm != "none":
+        raise ValueError(f"feature_id_scope must be 'none', 'dataset', or 'task'; got '{scope}'.")
+    if include_sample_col:
+        parts.append(sample_col)
+    parts.append(base_id)
+    joined = "__".join(parts) if parts else base_id
+    return _sanitize_feature_id(joined)
+
+
 class LinearCSVDataset(Dataset):
     """Dataset for linear probe training with per-WSI vector features.
 
@@ -90,6 +143,10 @@ class LinearCSVDataset(Dataset):
         sample_col: str = 'case_id',
         feature_parent_dir: str = '',
         case_fusion: str = 'late',
+        embedding_level: str = 'slide',
+        feature_id_scope: str = 'none',
+        dataset_name: Optional[str] = None,
+        task_name: Optional[str] = None,
     ):
         super().__init__()
         if case_fusion not in ('late', 'early'):
@@ -99,10 +156,26 @@ class LinearCSVDataset(Dataset):
         if sample_col_norm not in ('filename', 'case_id'):
             raise ValueError(f"sample_col must be 'filename' or 'case_id', got {sample_col}")
         self.sample_col = sample_col_norm
+        embedding_level_norm = str(embedding_level).strip().lower()
+        if embedding_level_norm not in ("slide", "case"):
+            raise ValueError(f"embedding_level must be 'slide' or 'case', got {embedding_level}")
+        self.embedding_level = embedding_level_norm
+        feature_id_scope_norm = str(feature_id_scope).strip().lower()
+        if feature_id_scope_norm not in ("none", "dataset", "task"):
+            raise ValueError(f"feature_id_scope must be 'none', 'dataset', or 'task', got {feature_id_scope}")
+        self.feature_id_scope = feature_id_scope_norm
         feature_parent_dir = str(feature_parent_dir).strip()
         if not feature_parent_dir:
             raise ValueError("feature_parent_dir must be provided (e.g., 'features_lunit-vits8').")
         self.feature_parent_dir = feature_parent_dir
+
+        inferred_dataset, inferred_task = _infer_dataset_task(csv_path)
+        self.dataset_name = dataset_name or inferred_dataset
+        self.task_name = task_name or inferred_task
+        if self.feature_id_scope == "dataset" and not self.dataset_name:
+            raise ValueError("feature_id_scope='dataset' requires dataset_name.")
+        if self.feature_id_scope == "task" and (not self.dataset_name or not self.task_name):
+            raise ValueError("feature_id_scope='task' requires dataset_name and task_name.")
 
         if dataframe is not None:
             df = dataframe.copy()
@@ -217,44 +290,97 @@ class LinearCSVDataset(Dataset):
                     'split': split,
                 })
 
-        # Index feature files for all slides we expect
-        all_slide_ids: List[str] = []
-        for s in self.samples:
-            all_slide_ids.extend(s['slide_ids'])
+        use_case_embeddings = self.embedding_level == "case"
+        include_sample_col = use_case_embeddings
+        use_legacy_keys = (not use_case_embeddings and self.feature_id_scope == "none")
+
+        def _make_feature_key(raw_id: str, *, id_is_filename: bool) -> str:
+            if use_legacy_keys:
+                base = os.path.basename(raw_id)
+                return os.path.splitext(base)[0]
+            return _compose_feature_id(
+                raw_id,
+                sample_col=self.sample_col,
+                scope=self.feature_id_scope,
+                dataset_name=self.dataset_name,
+                task_name=self.task_name,
+                include_sample_col=include_sample_col,
+                id_is_filename=id_is_filename,
+            )
+
+        target_ids: List[str] = []
+        if use_case_embeddings:
+            for s in self.samples:
+                sid = s.get("id")
+                if sid is None:
+                    continue
+                target_ids.append(str(sid))
+        else:
+            for s in self.samples:
+                target_ids.extend(s["slide_ids"])
+
         target_stems: Set[str] = set()
-        for slide in all_slide_ids:
-            slide = str(slide).strip()
-            base = os.path.basename(slide)
-            base_no_ext = os.path.splitext(base)[0]
-            target_stems.add(base_no_ext)
+        for raw_id in target_ids:
+            raw_id = str(raw_id).strip()
+            if not raw_id:
+                continue
+            id_is_filename = (not use_case_embeddings) or (self.sample_col == "filename")
+            target_stems.add(_make_feature_key(raw_id, id_is_filename=id_is_filename))
 
-        self._file_index = _index_feature_files(self.features_dir, self.allowed_exts, target_stems=target_stems, parent_dir_name=self.feature_parent_dir)
+        self._file_index = _index_feature_files(
+            self.features_dir,
+            self.allowed_exts,
+            target_stems=target_stems,
+            parent_dir_name=self.feature_parent_dir,
+        )
 
-        # Filter out samples whose slides are missing
+        # Filter out samples whose features are missing
         filtered_samples: List[dict] = []
         missing_ids: List[str] = []
         matched_slides = 0
         for sample in self.samples:
             paths = []
-            resolved_slide_ids = []
-            for slide in sample['slide_ids']:
-                basename = os.path.basename(str(slide).strip())
-                base_no_ext = os.path.splitext(basename)[0]
-                if base_no_ext in self._file_index:
-                    self._file_index.setdefault(basename, self._file_index[base_no_ext])
-                    self._file_index.setdefault(slide, self._file_index[base_no_ext])
-                fp = self._file_index.get(basename) or self._file_index.get(base_no_ext) or self._file_index.get(slide)
+            resolved_slide_ids = [os.path.basename(str(s).strip()) for s in sample.get("slide_ids", [])]
+            if use_case_embeddings:
+                raw_id = sample.get("id")
+                if raw_id is None:
+                    continue
+                id_is_filename = self.sample_col == "filename"
+                feature_key = _make_feature_key(str(raw_id), id_is_filename=id_is_filename)
+                fp = self._file_index.get(feature_key)
                 if fp is None:
-                    missing_ids.append(str(slide))
+                    missing_ids.append(str(raw_id))
                     continue
                 paths.append(fp)
-                resolved_slide_ids.append(basename)
+            else:
+                for slide in sample["slide_ids"]:
+                    raw_slide = str(slide).strip()
+                    if not raw_slide:
+                        continue
+                    if use_legacy_keys:
+                        basename = os.path.basename(raw_slide)
+                        base_no_ext = os.path.splitext(basename)[0]
+                        if base_no_ext in self._file_index:
+                            self._file_index.setdefault(basename, self._file_index[base_no_ext])
+                            self._file_index.setdefault(raw_slide, self._file_index[base_no_ext])
+                        fp = (
+                            self._file_index.get(basename)
+                            or self._file_index.get(base_no_ext)
+                            or self._file_index.get(raw_slide)
+                        )
+                    else:
+                        feature_key = _make_feature_key(raw_slide, id_is_filename=True)
+                        fp = self._file_index.get(feature_key)
+                    if fp is None:
+                        missing_ids.append(raw_slide)
+                        continue
+                    paths.append(fp)
             if len(paths) == 0:
                 continue
             matched_slides += len(paths)
-            filtered_samples.append({**sample, 'paths': paths, 'slide_ids': resolved_slide_ids})
+            filtered_samples.append({**sample, "paths": paths, "slide_ids": resolved_slide_ids})
 
-        total_slides = len(all_slide_ids)
+        total_slides = len(target_ids)
         self.samples = filtered_samples
         if len(self.samples) == 0:
             raise RuntimeError(
@@ -281,7 +407,9 @@ class LinearCSVDataset(Dataset):
         grouping_desc = 'case_id' if self.sample_col == 'case_id' else 'filename'
         logger.info(
             f"[LinearCSVDataset] Using {len(self.samples)} samples (sample_col={grouping_desc}) "
-            f"with case_fusion={self.case_fusion}. Matched {self.valid_rows}/{self.total_rows} slides; missing={self.missing_rows}."
+            f"with case_fusion={self.case_fusion}, embedding_level={self.embedding_level}, "
+            f"feature_id_scope={self.feature_id_scope}. Matched {self.valid_rows}/{self.total_rows} "
+            f"feature files; missing={self.missing_rows}."
         )
 
     @property
@@ -307,6 +435,10 @@ class LinearCSVDataset(Dataset):
             feats = _load_vector_features(fp)  # shape (D,)
             slide_feats.append(feats)
 
+        if self.embedding_level == "case" and len(slide_feats) != 1:
+            raise ValueError(
+                f"embedding_level='case' expects 1 feature per sample; got {len(slide_feats)} for id={sample['id']}"
+            )
         if len(slide_feats) == 1:
             fused = slide_feats[0]
         else:

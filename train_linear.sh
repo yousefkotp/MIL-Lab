@@ -12,6 +12,8 @@
 #   - NORMALIZE: if set to 1/true, pass --normalize
 #   - CSV_PATH: single CSV containing columns filename,label[,case_id]
 #   - NUM_FOLDS: number of folds to create from CSV_PATH (default: 5)
+#   - EMBEDDING_LEVEL: slide (default) or case for case-level embeddings
+#   - FEATURE_ID_SCOPE: none (default), dataset, or task to namespace feature stems
 
 #SBATCH -J train_linear
 #SBATCH --ntasks-per-node 1
@@ -42,6 +44,8 @@ FEATURES_SRC_DIR="${FEATURES_SRC_DIR:-}"   # should be absolute path
 FEATURES_PARENT_DIR="${FEATURES_PARENT_DIR:-}"
 CSV_PATH="${CSV_PATH:-}"  # required: single CSV with filename,label[,case_id]
 NUM_FOLDS="${NUM_FOLDS:-5}"
+EMBEDDING_LEVEL="${EMBEDDING_LEVEL:-slide}"
+FEATURE_ID_SCOPE="${FEATURE_ID_SCOPE:-none}"
 
 if [[ -z "${FEATURES_SRC_DIR}" ]]; then
   echo "ERROR: FEATURES_SRC_DIR is not set. Provide absolute path to vector features." >&2
@@ -139,6 +143,8 @@ python scripts/build_feature_manifest.py \
   --features_dir "${FEATURES_SRC_DIR}" \
   --parent_dir "${FEATURES_PARENT_DIR}" \
   --mode linear \
+  --embedding_level "${EMBEDDING_LEVEL}" \
+  --feature_id_scope "${FEATURE_ID_SCOPE}" \
   > "${FEATURE_MANIFEST}" 2> "${FEATURE_MANIFEST_ERR}"
 MANIFEST_STATUS=$?
 set -e
@@ -189,6 +195,8 @@ python train_linear.py \
   --num_folds "${NUM_FOLDS}" \
   --features_dir "${TMP_FEATURES_DIR}" \
   --feature_parent_dir "${FEATURES_PARENT_DIR}" \
+  --embedding_level "${EMBEDDING_LEVEL}" \
+  --feature_id_scope "${FEATURE_ID_SCOPE}" \
   --epochs "${EPOCHS}" \
   --lr "${LR}" \
   --weight_decay "${WEIGHT_DECAY}" \
