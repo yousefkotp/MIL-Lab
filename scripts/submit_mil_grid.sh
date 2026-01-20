@@ -3,7 +3,13 @@ set -euo pipefail
 
 # Define tasks (format: .../<dataset>/<task>/task.csv)
 CSV_PATHS=(
-  /home/kotpaz/scratch/tasks/custom/imp_cervix/dysplasia_grading/task.csv
+  /home/kotpaz/scratch/tasks/custom/TCGA-BRCA/primary_diagnosis/task.csv
+  /home/kotpaz/scratch/tasks/custom/TCGA-COAD/primary_diagnosis/task.csv
+  /home/kotpaz/scratch/tasks/custom/TCGA-ESCA/primary_diagnosis/task.csv
+  /home/kotpaz/scratch/tasks/custom/TCGA-SARC/primary_diagnosis/task.csv
+  /home/kotpaz/scratch/tasks/custom/TCGA-TGCT/primary_diagnosis/task.csv
+  /home/kotpaz/scratch/tasks/custom/TCGA-THYM/primary_diagnosis/task.csv
+  /home/kotpaz/scratch/tasks/custom/TCGA-UCEC/primary_diagnosis/task.csv
 )
 
 # CSV_PATHS=(

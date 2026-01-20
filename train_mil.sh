@@ -12,6 +12,9 @@
 
 set -euo pipefail
 
+module load proj
+source /home/kotpaz/envs/atlas_path/bin/activate
+
 # Ensure we run from the repository root
 # - When sbatch copies the script to the slurm spool, "$0" points there,
 #   so we can't reliably use dirname "$0". Prefer an exported REPO_ROOT

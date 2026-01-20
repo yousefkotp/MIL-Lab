@@ -26,6 +26,9 @@
 
 set -euo pipefail
 
+module load proj
+source /home/kotpaz/envs/atlas_path/bin/activate
+
 # Resolve and move to repo root (prefer exported REPO_ROOT)
 REPO_ROOT_DIR="${REPO_ROOT:-${SLURM_SUBMIT_DIR:-${PWD}}}"
 cd "${REPO_ROOT_DIR}"

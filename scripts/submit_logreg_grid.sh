@@ -56,6 +56,21 @@ CSV_PATHS=(
   /home/kotpaz/scratch/tasks/custom/mbc/treatment_response/task.csv
   /home/kotpaz/scratch/tasks/custom/panda/prostate_cancer_grade/task.csv
   /home/kotpaz/scratch/tasks/custom/imp_cervix/dysplasia_grading/task.csv
+  /home/kotpaz/scratch/tasks/custom/TCGA-BRCA/primary_diagnosis/task.csv
+  /home/kotpaz/scratch/tasks/custom/TCGA-COAD/primary_diagnosis/task.csv
+  /home/kotpaz/scratch/tasks/custom/TCGA-ESCA/primary_diagnosis/task.csv
+  /home/kotpaz/scratch/tasks/custom/TCGA-SARC/primary_diagnosis/task.csv
+  /home/kotpaz/scratch/tasks/custom/TCGA-TGCT/primary_diagnosis/task.csv
+  /home/kotpaz/scratch/tasks/custom/TCGA-THYM/primary_diagnosis/task.csv
+  /home/kotpaz/scratch/tasks/custom/TCGA-UCEC/primary_diagnosis/task.csv
+  /home/kotpaz/scratch/tasks/custom/TCGA/cancer_type_classification/task.csv
+  /home/kotpaz/scratch/tasks/custom/cptac_lung/subtype/task.csv
+  /home/kotpaz/scratch/tasks/custom/cptac_all/organ/task.csv
+  /home/kotpaz/scratch/tasks/custom/mut-het-rcc/BAP1_mutation/task.csv
+  /home/kotpaz/scratch/tasks/custom/mut-het-rcc/PBRM1_mutation/task.csv
+  /home/kotpaz/scratch/tasks/custom/mut-het-rcc/SETD2_mutation/task.csv
+  /home/kotpaz/scratch/tasks/custom/nadt/response/task.csv
+  /home/kotpaz/scratch/tasks/custom/natbrca/lymphovascular_invasion/task.csv
 )
 if [[ ${#CSV_PATHS[@]} -eq 0 ]]; then
   echo "CSV_PATHS must list at least one task CSV (format: .../<dataset>/<task>/task.csv)." >&2
@@ -78,8 +93,8 @@ CASE_FUSION="${CASE_FUSION:-late}"
 FEATURE_DIRS=(
   /home/kotpaz/projects/rrg-msh/kotpaz/datasets
 )
-FEATURES_PARENT_DIR="global_windows_no_dropping"
-FEAT_BASE_NAME="slide_as_window_no_dropping_log_reg"
+FEATURES_PARENT_DIR="teacher_supervised_epoch_10"
+FEAT_BASE_NAME="teacher_supervised_epoch_10"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${SCRIPT_DIR%/scripts}"

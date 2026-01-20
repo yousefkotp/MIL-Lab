@@ -56,19 +56,22 @@ CSV_PATHS=(
   /home/kotpaz/scratch/tasks/custom/mbc/treatment_response/task.csv
   /home/kotpaz/scratch/tasks/custom/panda/prostate_cancer_grade/task.csv
   /home/kotpaz/scratch/tasks/custom/imp_cervix/dysplasia_grading/task.csv
+  /home/kotpaz/scratch/tasks/custom/TCGA-BRCA/primary_diagnosis/task.csv
+  /home/kotpaz/scratch/tasks/custom/TCGA-COAD/primary_diagnosis/task.csv
+  /home/kotpaz/scratch/tasks/custom/TCGA-ESCA/primary_diagnosis/task.csv
+  /home/kotpaz/scratch/tasks/custom/TCGA-SARC/primary_diagnosis/task.csv
+  /home/kotpaz/scratch/tasks/custom/TCGA-TGCT/primary_diagnosis/task.csv
+  /home/kotpaz/scratch/tasks/custom/TCGA-THYM/primary_diagnosis/task.csv
+  /home/kotpaz/scratch/tasks/custom/TCGA-UCEC/primary_diagnosis/task.csv
+  /home/kotpaz/scratch/tasks/custom/TCGA/cancer_type_classification/task.csv
+  /home/kotpaz/scratch/tasks/custom/cptac_lung/subtype/task.csv
+  /home/kotpaz/scratch/tasks/custom/cptac_all/organ/task.csv
+  /home/kotpaz/scratch/tasks/custom/mut-het-rcc/BAP1_mutation/task.csv
+  /home/kotpaz/scratch/tasks/custom/mut-het-rcc/PBRM1_mutation/task.csv
+  /home/kotpaz/scratch/tasks/custom/mut-het-rcc/SETD2_mutation/task.csv
+  /home/kotpaz/scratch/tasks/custom/nadt/response/task.csv
+  /home/kotpaz/scratch/tasks/custom/natbrca/lymphovascular_invasion/task.csv
 )
-# CSV_PATHS=(
-#   /home/kotpaz/scratch/tasks/custom/bracs/coarse/task.csv
-#   /home/kotpaz/scratch/tasks/custom/bracs/fine/task.csv
-#   /home/kotpaz/scratch/tasks/custom/camelyon17/breast_cancer_metastases/task.csv
-#   /home/kotpaz/scratch/tasks/custom/dhmc_kidney/morphological_subtyping/task.csv
-#   /home/kotpaz/scratch/tasks/custom/dhmc_luad/histologic_pattern/task.csv
-#   /home/kotpaz/scratch/tasks/custom/ebrains/diagnosis/task.csv
-#   /home/kotpaz/scratch/tasks/custom/ebrains/diagnosis_group/task.csv
-#   /home/kotpaz/scratch/tasks/custom/ebrains/idh_status/task.csv
-#   /home/kotpaz/scratch/tasks/custom/imp/grade/task.csv
-#   /home/kotpaz/scratch/tasks/custom/panda/prostate_cancer_grade/task.csv
-# )
 if [[ ${#CSV_PATHS[@]} -eq 0 ]]; then
   echo "CSV_PATHS must list at least one task CSV (format: .../<dataset>/<task>/task.csv)." >&2
   exit 1
@@ -96,8 +99,8 @@ DROPOUT="${DROPOUT:-0.25}"
 FEATURE_DIRS=(
   /home/kotpaz/projects/rrg-msh/kotpaz/datasets
 )
-FEATURES_PARENT_DIR="global_windows_no_dropping"
-FEAT_BASE_NAME="slide_as_window_no_dropping"
+FEATURES_PARENT_DIR="linear_epoch_20"
+FEAT_BASE_NAME="linear_epoch_20"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${SCRIPT_DIR%/scripts}"
