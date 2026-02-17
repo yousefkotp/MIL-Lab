@@ -1012,8 +1012,8 @@ def main():
     parser.add_argument(
         '--places',
         type=int,
-        default=4,
-        help='Decimal places for output (default: 4)'
+        default=3,
+        help='Decimal places for output and LaTeX table (default: 3)'
     )
     parser.add_argument(
         '--save-json',
