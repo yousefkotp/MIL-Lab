@@ -43,6 +43,90 @@ METRIC_DISPLAY_NAMES = {
     'recall_macro': 'Recall (macro)',
 }
 
+DATASET_DISPLAY_NAMES = {
+    'TCGA': 'TCGA',
+    'TCGA_BRCA': 'TCGA-BRCA',
+    'TCGA_COAD': 'TCGA-COAD',
+    'TCGA_ESCA': 'TCGA-ESCA',
+    'TCGA_SARC': 'TCGA-SARC',
+    'TCGA_TGCT': 'TCGA-TGCT',
+    'TCGA_THYM': 'TCGA-THYM',
+    'TCGA_UCEC': 'TCGA-UCEC',
+    'bc_therapy': 'BC Therapy',
+    'bracs': 'BRACS',
+    'camelyon17': 'Camelyon17',
+    'cptac_all': 'CPTAC',
+    'cptac_brca': 'CPTAC-BRCA',
+    'cptac_ccrcc': 'CPTAC-CCRCC',
+    'cptac_coad': 'CPTAC-COAD',
+    'cptac_gbm': 'CPTAC-GBM',
+    'cptac_hnsc': 'CPTAC-HNSC',
+    'cptac_lscc': 'CPTAC-LSCC',
+    'cptac_luad': 'CPTAC-LUAD',
+    'cptac_lung': 'CPTAC-Lung',
+    'cptac_ov': 'CPTAC-OV',
+    'cptac_pda': 'CPTAC-PDA',
+    'cptac_ucec': 'CPTAC-UCEC',
+    'dhmc_kidney': 'DHMC-Kidney',
+    'dhmc_luad': 'DHMC-LUAD',
+    'ebrains': 'eBrains',
+    'imp': 'IMP',
+    'imp_cervix': 'IMP-Cervix',
+    'mbc': 'MBC',
+    'mut-het-rcc': 'Mut-Het-RCC',
+    'nadt': 'NADT',
+    'natbrca': 'NatBRCA',
+    'panda': 'PANDA',
+}
+
+TASK_DISPLAY_NAMES = {
+    'cancer_type_classification': 'Cancer Type',
+    'primary_diagnosis': 'Primary Diagnosis',
+    'er_status': 'ER Status',
+    'grade': 'Grade',
+    'her2_status': 'HER2 Status',
+    'residual_cancer_burden': 'Residual Cancer Burden',
+    'coarse': 'Coarse Grading',
+    'fine': 'Fine Grading',
+    'breast_cancer_metastases': 'Metastases',
+    'organ': 'Organ',
+    'subtype': 'Subtype',
+    'morphological_subtyping': 'Morphological Subtype',
+    'histologic_pattern': 'Histologic Pattern',
+    'diagnosis': 'Diagnosis',
+    'diagnosis_group': 'Diagnosis Group',
+    'idh_status': 'IDH Status',
+    'dysplasia_grading': 'Dysplasia Grading',
+    'treatment_response': 'Treatment Response',
+    'response': 'Response',
+    'lymphovascular_invasion': 'Lymphovascular Invasion',
+    'prostate_cancer_grade': 'Prostate Cancer Grade',
+    # Immune
+    'Immune_class': 'Immune Class',
+    # Mutations
+    'APC_mutation': 'APC Mut.',
+    'ACVR2A_mutation': 'ACVR2A Mut.',
+    'ARID1A_mutation': 'ARID1A Mut.',
+    'BAP1_mutation': 'BAP1 Mut.',
+    'CASP8_mutation': 'CASP8 Mut.',
+    'CTNNB1_mutation': 'CTNNB1 Mut.',
+    'EGFR_mutation': 'EGFR Mut.',
+    'KEAP1_mutation': 'KEAP1 Mut.',
+    'KRAS_mutation': 'KRAS Mut.',
+    'PBRM1_mutation': 'PBRM1 Mut.',
+    'PIK3CA_mutation': 'PIK3CA Mut.',
+    'PTEN_mutation': 'PTEN Mut.',
+    'SETD1B_mutation': 'SETD1B Mut.',
+    'SETD2_mutation': 'SETD2 Mut.',
+    'SMAD4_mutation': 'SMAD4 Mut.',
+    'STK11_mutation': 'STK11 Mut.',
+    'TP53_mutation': 'TP53 Mut.',
+    'VHL_mutation': 'VHL Mut.',
+    # Grades / histology
+    'Histologic_Grade': 'Histologic Grade',
+    'MSI_H': 'MSI-H',
+}
+
 
 def _is_number(x) -> bool:
     try:
@@ -861,34 +945,37 @@ def generate_latex_table(
             f'(methods: {_escape_latex(method_str)})'
         )
 
-    col_spec = 'll' + 'c' * n_encoders
+    encoder_col = r'>{\centering\arraybackslash}X'
+    col_spec = 'cc' + encoder_col * n_encoders
     lines = [
         r'\documentclass{article}',
         r'\usepackage[landscape,margin=1cm]{geometry}',
         r'\usepackage{booktabs}',
-        r'\usepackage{multirow}',
-        r'\usepackage{adjustbox}',
+        r'\usepackage{xltabular}',
         r'\usepackage{amsmath}',
         r'\pagestyle{empty}',
         '',
         r'\begin{document}',
-        r'\begin{table}[htbp]',
-        r'\centering',
+        f'\\begin{{xltabular}}{{\\textwidth}}{{{col_spec}}}',
         f'\\caption{{{caption}}}',
-        f'\\label{{{label}}}',
-        r'\begin{adjustbox}{max width=\textwidth}',
-        f'\\begin{{tabular}}{{{col_spec}}}',
+        f'\\label{{{label}}} \\\\',
         r'\toprule',
         f'Task & Metric & {encoder_headers} \\\\',
         r'\midrule',
+        r'\endfirsthead',
+        r'\toprule',
+        f'Task & Metric & {encoder_headers} \\\\',
+        r'\midrule',
+        r'\endhead',
+        r'\bottomrule',
+        r'\endfoot',
     ]
 
     for task_idx, (dataset, task) in enumerate(sorted_tasks):
         task_metrics = metric_data.get((dataset, task), {})
-        task_label = (
-            f'{_escape_latex(dataset)}\\\\'
-            f'{_escape_latex(task)}'
-        )
+        dataset_display = DATASET_DISPLAY_NAMES.get(dataset, _escape_latex(dataset))
+        task_display = TASK_DISPLAY_NAMES.get(task, _escape_latex(task))
+        task_label = f'{_escape_latex(dataset_display)}/{_escape_latex(task_display)}'
 
         for metric_idx, metric in enumerate(metrics):
             encoder_values = task_metrics.get(metric, {})
@@ -920,12 +1007,8 @@ def generate_latex_table(
             )
 
             if metric_idx == 0:
-                task_cell = (
-                    f'\\multirow{{{n_metrics}}}{{*}}'
-                    f'{{\\shortstack[l]{{{task_label}}}}}'
-                )
                 lines.append(
-                    f'{task_cell} & {metric_display} & {entries_str} \\\\'
+                    f'{task_label} & {metric_display} & {entries_str} \\\\'
                 )
             else:
                 lines.append(f' & {metric_display} & {entries_str} \\\\')
@@ -934,10 +1017,7 @@ def generate_latex_table(
             lines.append(r'\midrule')
 
     lines.extend([
-        r'\bottomrule',
-        r'\end{tabular}',
-        r'\end{adjustbox}',
-        r'\end{table}',
+        r'\end{xltabular}',
         r'\end{document}',
     ])
 
@@ -952,18 +1032,22 @@ def compile_latex_to_pdf(tex_path: str) -> Optional[str]:
     output_dir = tex_path_obj.parent
 
     try:
-        subprocess.run(
-            [
-                'pdflatex',
-                '-interaction=nonstopmode',
-                '-output-directory',
-                str(output_dir),
-                str(tex_path),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
+        pdflatex_cmd = [
+            'pdflatex',
+            '-interaction=nonstopmode',
+            '-output-directory',
+            str(output_dir),
+            str(tex_path),
+        ]
+        # Run twice: longtable/xltabular needs two passes to
+        # compute correct column widths via the .aux file.
+        for _ in range(2):
+            subprocess.run(
+                pdflatex_cmd,
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
 
         pdf_path = tex_path_obj.with_suffix('.pdf')
         if pdf_path.exists():
@@ -1447,7 +1531,7 @@ def main():
             }
 
         if metric_data:
-            encoder_list = sorted(results.keys())
+            encoder_list = args.encoders if args.encoders else sorted(results.keys())
             latex_content = generate_latex_table(
                 metric_data,
                 encoder_list,
