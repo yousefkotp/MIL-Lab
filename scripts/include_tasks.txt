@@ -1,0 +1,11 @@
+bc_therapy/residual_cancer_burden
+cptac_ccrcc/BAP1_mutation
+cptac_coad/ACVR2A_mutation
+cptac_lscc/Histologic_Grade
+cptac_luad/KRAS_mutation
+ebrains/idh_status
+mbc/treatment_response
+cptac_brca/TP53_mutation
+# cptac_coad/Immune_class
+# cptac_coad/KRAS_mutation
+# TCGA_THYM/primary_diagnosis

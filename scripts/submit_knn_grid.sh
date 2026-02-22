@@ -56,13 +56,13 @@ CSV_PATHS=(
   /home/kotpaz/scratch/tasks/custom/mbc/treatment_response/task.csv
   /home/kotpaz/scratch/tasks/custom/panda/prostate_cancer_grade/task.csv
   /home/kotpaz/scratch/tasks/custom/imp_cervix/dysplasia_grading/task.csv
-  /home/kotpaz/scratch/tasks/custom/TCGA-BRCA/primary_diagnosis/task.csv
-  /home/kotpaz/scratch/tasks/custom/TCGA-COAD/primary_diagnosis/task.csv
-  /home/kotpaz/scratch/tasks/custom/TCGA-ESCA/primary_diagnosis/task.csv
-  /home/kotpaz/scratch/tasks/custom/TCGA-SARC/primary_diagnosis/task.csv
-  /home/kotpaz/scratch/tasks/custom/TCGA-TGCT/primary_diagnosis/task.csv
-  /home/kotpaz/scratch/tasks/custom/TCGA-THYM/primary_diagnosis/task.csv
-  /home/kotpaz/scratch/tasks/custom/TCGA-UCEC/primary_diagnosis/task.csv
+  /home/kotpaz/scratch/tasks/custom/TCGA_BRCA/primary_diagnosis/task.csv
+  /home/kotpaz/scratch/tasks/custom/TCGA_COAD/primary_diagnosis/task.csv
+  /home/kotpaz/scratch/tasks/custom/TCGA_ESCA/primary_diagnosis/task.csv
+  /home/kotpaz/scratch/tasks/custom/TCGA_SARC/primary_diagnosis/task.csv
+  /home/kotpaz/scratch/tasks/custom/TCGA_TGCT/primary_diagnosis/task.csv
+  /home/kotpaz/scratch/tasks/custom/TCGA_THYM/primary_diagnosis/task.csv
+  /home/kotpaz/scratch/tasks/custom/TCGA_UCEC/primary_diagnosis/task.csv
   /home/kotpaz/scratch/tasks/custom/TCGA/cancer_type_classification/task.csv
   /home/kotpaz/scratch/tasks/custom/cptac_lung/subtype/task.csv
   /home/kotpaz/scratch/tasks/custom/cptac_all/organ/task.csv
@@ -92,15 +92,15 @@ KNN_WEIGHTS="${KNN_WEIGHTS:-distance}"
 KNN_METRIC="${KNN_METRIC:-minkowski}"
 KNN_P="${KNN_P:-2}"
 KNN_ALGO="${KNN_ALGO:-brute}"
-EMBEDDING_LEVEL="${EMBEDDING_LEVEL:-slide}" # case, slide
-FEATURE_ID_SCOPE="${FEATURE_ID_SCOPE:-none}" # none, task, dataset
+EMBEDDING_LEVEL="${EMBEDDING_LEVEL:-case}" # case, slide (prev case)
+FEATURE_ID_SCOPE="${FEATURE_ID_SCOPE:-task}" # none, task, dataset (prev task)
 
 # Feature directories to iterate (absolute paths)
 FEATURE_DIRS=(
   /home/kotpaz/projects/rrg-msh/kotpaz/datasets
 )
-FEATURES_PARENT_DIR="linear_epoch_20"
-FEAT_BASE_NAME="linear_epoch_20"
+FEATURES_PARENT_DIR="teacher_supervised_epoch_12"
+FEAT_BASE_NAME="teacher_supervised_epoch_12"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${SCRIPT_DIR%/scripts}"
